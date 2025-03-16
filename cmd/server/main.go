@@ -16,9 +16,10 @@ import (
 func main() {
 	// Parse command line flags (for backward compatibility)
 	var (
-		port     = flag.Int("port", 0, "Server port (override env SERVER_PORT)")
-		dbType   = flag.String("db-type", "", "Database type (override env DB_TYPE)")
-		dbConfig = flag.String("db-config", "", "Database connection string (override env-based config)")
+		port          = flag.Int("port", 0, "Server port (override env SERVER_PORT)")
+		dbType        = flag.String("db-type", "", "Database type (override env DB_TYPE)")
+		dbConfig      = flag.String("db-config", "", "Database connection string (override env-based config)")
+		transportMode = flag.String("transport", "", "Transport mode: stdio or sse (override env TRANSPORT_MODE)")
 	)
 	flag.Parse()
 
@@ -37,11 +38,23 @@ func main() {
 		cfg.DB.Type = *dbType
 	}
 
+	if *transportMode != "" {
+		switch *transportMode {
+		case string(config.StdioTransport):
+			cfg.TransportMode = config.StdioTransport
+		case string(config.SSETransport):
+			cfg.TransportMode = config.SSETransport
+		default:
+			log.Printf("Warning: Invalid transport mode '%s', using default '%s'", *transportMode, cfg.TransportMode)
+		}
+	}
+
 	// Create server config
 	serverConfig := server.Config{
-		Port:     cfg.ServerPort,
-		DBType:   cfg.DB.Type,
-		DBConfig: *dbConfig, // This will be empty if not provided via command line
+		Port:          cfg.ServerPort,
+		DBType:        cfg.DB.Type,
+		DBConfig:      *dbConfig, // This will be empty if not provided via command line
+		TransportMode: cfg.TransportMode,
 	}
 
 	// If no explicit connection string provided, build it from environment variables

@@ -1,4 +1,4 @@
-.PHONY: build run test clean
+.PHONY: build run run-stdio run-sse test clean
 
 # Variables
 BINARY_NAME=server
@@ -21,6 +21,26 @@ run: build
 	else \
 		echo "Permission issue detected, running with 'go run' instead"; \
 		go run $(CMD_DIR) -port $(PORT); \
+	fi
+
+# Run with stdio transport (for local development with Cursor)
+run-stdio: build
+	@echo "Running with stdio transport..."
+	@if [ -x ./$(BINARY_NAME) ]; then \
+		./$(BINARY_NAME) -transport stdio; \
+	else \
+		echo "Permission issue detected, running with 'go run' instead"; \
+		go run $(CMD_DIR) -transport stdio; \
+	fi
+
+# Run with SSE transport (for production)
+run-sse: build
+	@echo "Running with SSE transport on port $(PORT)..."
+	@if [ -x ./$(BINARY_NAME) ]; then \
+		./$(BINARY_NAME) -transport sse -port $(PORT); \
+	else \
+		echo "Permission issue detected, running with 'go run' instead"; \
+		go run $(CMD_DIR) -transport sse -port $(PORT); \
 	fi
 
 # Run with MySQL (uses .env configuration but enforces MySQL)

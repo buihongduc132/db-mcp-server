@@ -11,6 +11,7 @@ MCP Server is a MySQL client proxy server that allows clients to connect via Ser
 - Subscription-based change notifications
 - **Integration with Cursor Editor's Model Context Protocol (MCP)**
 - **Environment-based configuration with .env file support**
+- **Support for both stdio and SSE transport modes for Cursor MCP**
 
 ## Project Structure
 
@@ -28,6 +29,7 @@ mcp-server/
 │   │   └── api/             # HTTP API handlers
 │   └── infrastructure/      # Infrastructure layer
 │       ├── database/        # Database implementations
+│       ├── transport/       # Transport implementations (stdio, SSE)
 │       └── server/          # Server infrastructure
 ├── docs/                    # Documentation
 │   └── cursor-integration.md # Guide for Cursor integration
@@ -58,6 +60,7 @@ The application can be configured using environment variables or a `.env` file. 
 ```ini
 # Server Configuration
 SERVER_PORT=9090
+TRANSPORT_MODE=sse  # Options: stdio (local), sse (production)
 
 # Database Configuration
 DB_TYPE=mysql
@@ -82,6 +85,18 @@ Run the application (uses .env file configuration):
 make run
 ```
 
+Run with stdio transport (for local development with Cursor):
+
+```bash
+make run-stdio
+```
+
+Run with SSE transport (for production):
+
+```bash
+make run-sse
+```
+
 Run with MySQL (using .env for database credentials):
 
 ```bash
@@ -97,7 +112,7 @@ make run-postgres
 Run with custom configuration (overrides .env):
 
 ```bash
-./mcp-server -port 8080 -db-type mysql -db-config "user:password@tcp(localhost:3306)/dbname"
+./mcp-server -port 8080 -db-type mysql -db-config "user:password@tcp(localhost:3306)/dbname" -transport sse
 ```
 
 ## API Usage
@@ -175,25 +190,57 @@ To add support for a new database system:
 
 The server now supports integration with Cursor Editor through its Model Context Protocol (MCP). This allows using your database directly from Cursor's AI assistant.
 
-### Cursor MCP Endpoint
+### Transport Modes
 
-The server exposes a dedicated endpoint for Cursor at:
+The server supports two transport modes for Cursor MCP:
+
+1. **stdio**: For local development, where Cursor runs the server as a subprocess
+2. **SSE**: For production, where the server runs independently and Cursor connects via HTTP
+
+### Cursor MCP Endpoints
+
+For SSE transport mode, the server exposes dedicated endpoints:
 
 ```
-http://localhost:9090/cursor-mcp
+http://localhost:9090/cursor-mcp  # Legacy endpoint
+http://localhost:9090/sse         # Standard SSE endpoint
 ```
 
 ### Setup in Cursor
 
-In Cursor, configure the external tool with:
+#### For stdio Transport (Local Development)
+
+In Cursor, configure the MCP server in `.cursor/mcp.json`:
 
 ```json
 {
-  "name": "Database Access",
-  "description": "Provides tools to interact with a database",
-  "transport": {
-    "type": "sse",
-    "serverUrl": "http://localhost:9090/cursor-mcp"
+  "mcpServers": {
+    "db-server": {
+      "command": "/path/to/mcp-server",
+      "args": ["-transport", "stdio"],
+      "env": {
+        "DB_TYPE": "mysql",
+        "DB_HOST": "localhost",
+        "DB_PORT": "3306",
+        "DB_USER": "your_username",
+        "DB_PASSWORD": "your_password",
+        "DB_NAME": "your_database"
+      }
+    }
+  }
+}
+```
+
+#### For SSE Transport (Production)
+
+In Cursor, configure the MCP server in `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "db-server": {
+      "url": "http://localhost:9090/sse"
+    }
   }
 }
 ```

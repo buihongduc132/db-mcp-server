@@ -8,6 +8,17 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// TransportMode defines the MCP transport protocol
+type TransportMode string
+
+const (
+	// StdioTransport is used for local development with stdio
+	StdioTransport TransportMode = "stdio"
+
+	// SSETransport is used for production with Server-Sent Events
+	SSETransport TransportMode = "sse"
+)
+
 // DBConfig represents database configuration
 type DBConfig struct {
 	Host     string
@@ -20,8 +31,9 @@ type DBConfig struct {
 
 // Config represents application configuration
 type Config struct {
-	ServerPort int
-	DB         DBConfig
+	ServerPort    int
+	DB            DBConfig
+	TransportMode TransportMode
 }
 
 // LoadConfig loads configuration from environment variables with .env file support
@@ -31,7 +43,8 @@ func LoadConfig() (*Config, error) {
 
 	// Initialize config with default values
 	config := &Config{
-		ServerPort: 9090, // Default server port
+		ServerPort:    9090,         // Default server port
+		TransportMode: SSETransport, // Default to SSE transport
 		DB: DBConfig{
 			Host:     "localhost",
 			Port:     3306,
@@ -46,6 +59,19 @@ func LoadConfig() (*Config, error) {
 	if port := os.Getenv("SERVER_PORT"); port != "" {
 		if portNum, err := strconv.Atoi(port); err == nil {
 			config.ServerPort = portNum
+		}
+	}
+
+	// Transport mode configuration
+	if mode := os.Getenv("TRANSPORT_MODE"); mode != "" {
+		switch mode {
+		case string(StdioTransport):
+			config.TransportMode = StdioTransport
+		case string(SSETransport):
+			config.TransportMode = SSETransport
+		default:
+			// Invalid transport mode, use default
+			fmt.Printf("Warning: Invalid transport mode '%s', using default 'sse'\n", mode)
 		}
 	}
 

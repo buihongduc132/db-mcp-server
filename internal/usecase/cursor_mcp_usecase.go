@@ -41,12 +41,25 @@ func (uc *CursorMCPUseCase) GetToolsEvent(ctx context.Context) (*entities.MCPEve
 func (uc *CursorMCPUseCase) ExecuteTool(ctx context.Context, toolRequest *entities.MCPToolRequest) (*entities.MCPEvent, error) {
 	response, err := uc.toolRepo.ExecuteTool(ctx, *toolRequest)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute tool: %w", err)
+		// Return a properly formatted error response
+		return &entities.MCPEvent{
+			Type: "tool_response",
+			Payload: map[string]interface{}{
+				"id":     toolRequest.ID,
+				"status": "error",
+				"error":  err.Error(),
+			},
+		}, nil
 	}
 
+	// Ensure the response has the correct format
 	event := &entities.MCPEvent{
-		Type:    "tool_response",
-		Payload: response,
+		Type: "tool_response",
+		Payload: map[string]interface{}{
+			"id":     response.ID,
+			"status": response.Status,
+			"result": response.Result,
+		},
 	}
 
 	return event, nil
