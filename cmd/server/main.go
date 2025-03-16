@@ -14,6 +14,9 @@ import (
 )
 
 func main() {
+	// Configure logging to use stderr instead of stdout to avoid interfering with JSON protocol
+	log.SetOutput(os.Stderr)
+
 	// Parse command line flags (for backward compatibility)
 	var (
 		port          = flag.Int("port", 0, "Server port (override env SERVER_PORT)")

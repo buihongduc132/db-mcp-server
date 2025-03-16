@@ -2,7 +2,9 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"mcpserver/internal/domain/entities"
 	"mcpserver/internal/domain/repositories"
 )
@@ -34,8 +36,13 @@ func (u *TransportUseCase) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to get tools: %w", err)
 	}
 
-	// Send tools event
-	if err := u.transport.Send(toolsEvent); err != nil {
+	// Convert to JSON and send tools event
+	toolsJSON, err := json.Marshal(toolsEvent)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tools event: %w", err)
+	}
+
+	if err := u.transport.SendRaw(string(toolsJSON)); err != nil {
 		return fmt.Errorf("failed to send tools event: %w", err)
 	}
 
@@ -56,27 +63,54 @@ func (u *TransportUseCase) handleRequests(ctx context.Context) {
 
 	for {
 		select {
-		case request := <-requestChan:
-			// Handle the request
-			responseEvent, err := u.toolUseCase.ExecuteTool(ctx, request)
-			if err != nil {
-				u.transport.Send(&entities.MCPEvent{
-					Type: "error",
-					Payload: map[string]string{
-						"error": err.Error(),
-					},
-				})
+		case requestObj := <-requestChan:
+			// Type assert the request to the correct type
+			mcpRequest, ok := requestObj.(*entities.MCPToolRequest)
+			if !ok {
+				log.Printf("Error: received request is not an MCPToolRequest: %T", requestObj)
 				continue
 			}
 
-			// Send the response
-			if err := u.transport.Send(responseEvent); err != nil {
-				fmt.Printf("Error sending response: %v\n", err)
+			// Handle the request with the correct type
+			response, err := u.toolUseCase.ExecuteTool(ctx, mcpRequest)
+			if err != nil {
+				// Create an error response in JSON-RPC 2.0 format
+				errorResponse := &entities.MCPToolResponse{
+					JsonRPC: entities.JSONRPCVersion,
+					ID:      mcpRequest.ID,
+					Error: &entities.MCPError{
+						Code:    entities.ErrorCodeInternalError,
+						Message: err.Error(),
+					},
+				}
+
+				// Marshal and send the error response
+				errorJSON, err := json.Marshal(errorResponse)
+				if err != nil {
+					log.Printf("Error marshaling error response: %v", err)
+					continue
+				}
+
+				if err := u.transport.SendRaw(string(errorJSON)); err != nil {
+					log.Printf("Error sending error response: %v", err)
+				}
+				continue
+			}
+
+			// Marshal and send the response
+			responseJSON, err := json.Marshal(response)
+			if err != nil {
+				log.Printf("Error marshaling response: %v", err)
+				continue
+			}
+
+			if err := u.transport.SendRaw(string(responseJSON)); err != nil {
+				log.Printf("Error sending response: %v", err)
 			}
 
 		case err := <-errorChan:
 			// Handle transport errors
-			fmt.Printf("Transport error: %v\n", err)
+			log.Printf("Transport error: %v", err)
 
 		case <-ctx.Done():
 			// Context canceled, stop handling requests

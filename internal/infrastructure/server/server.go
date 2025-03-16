@@ -116,6 +116,9 @@ func NewServer(cfg Config, dbRepo repositories.DBRepository) (*MCPServer, error)
 
 // Start starts the MCP server
 func (s *MCPServer) Start() error {
+	// Ensure all logs go to stderr to avoid corrupting stdout JSON
+	log.SetOutput(os.Stderr)
+
 	log.Printf("Server starting on %s", s.httpServer.Addr)
 	log.Printf("Cursor MCP endpoint available at http://localhost%s/cursor-mcp", s.httpServer.Addr)
 	log.Printf("SSE endpoint available at http://localhost%s/sse", s.httpServer.Addr)
@@ -128,6 +131,8 @@ func (s *MCPServer) Start() error {
 		transportFactory := transport.NewFactory()
 		stdioTransport, err := transportFactory.CreateTransport(config.StdioTransport, nil, nil)
 		if err != nil {
+			// Make sure error goes to stderr
+			fmt.Fprintf(os.Stderr, "Failed to create stdio transport: %v\n", err)
 			return fmt.Errorf("failed to create stdio transport: %w", err)
 		}
 
@@ -139,7 +144,7 @@ func (s *MCPServer) Start() error {
 		go func() {
 			ctx := context.Background()
 			if err := transportUseCase.Start(ctx); err != nil {
-				log.Printf("Error starting stdio transport: %v", err)
+				// Make sure all errors go to stderr
 				fmt.Fprintf(os.Stderr, "Error starting stdio transport: %v\n", err)
 				os.Exit(1)
 			}

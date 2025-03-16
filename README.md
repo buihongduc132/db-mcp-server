@@ -12,6 +12,7 @@ MCP Server is a MySQL client proxy server that allows clients to connect via Ser
 - **Integration with Cursor Editor's Model Context Protocol (MCP)**
 - **Environment-based configuration with .env file support**
 - **Support for both stdio and SSE transport modes for Cursor MCP**
+- **JSON-RPC 2.0 compliant protocol for communication**
 
 ## Project Structure
 
@@ -50,72 +51,216 @@ The application follows clean architecture principles:
 
 ### Prerequisites
 
-- Go 1.16 or later
+- Go 1.22 or higher
 - MySQL or PostgreSQL database
+- Cursor Editor (for MCP integration)
 
-### Configuration
+### Setup
 
-The application can be configured using environment variables or a `.env` file. Create a `.env` file in the root directory based on the `.env.example` template:
+1. Clone the repository
+2. Copy `.env.example` to `.env` and configure your environment variables
+3. Build the server with `make build`
 
-```ini
-# Server Configuration
-SERVER_PORT=9090
-TRANSPORT_MODE=sse  # Options: stdio (local), sse (production)
+### Running the Server
 
-# Database Configuration
-DB_TYPE=mysql
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=your_username
-DB_PASSWORD=your_password
-DB_NAME=your_database
-```
+There are two primary modes for running the server:
 
-### Building and Running
+1. **Standard SSE Mode** (for browser clients):
+   ```bash
+   make run-sse
+   ```
+   This runs the server on HTTP with SSE support.
 
-Build the application:
+2. **Stdio Mode** (for Cursor integration):
+   ```bash
+   make run-stdio
+   ```
+   This mode enables direct integration with the Cursor editor.
 
+You can also run directly with environment variable overrides:
 ```bash
-make build
+./server -port 9090 -transport sse -db-type mysql
 ```
 
-Run the application (uses .env file configuration):
+## Cursor MCP Integration
 
-```bash
-make run
+The MCP Server integrates with Cursor's Model Context Protocol, allowing the AI to interact directly with your database.
+
+### JSON-RPC 2.0 Protocol
+
+As of the latest version, MCP Server implements the JSON-RPC 2.0 protocol for all communications with Cursor. This ensures compatibility and standardized error handling.
+
+The protocol requires all messages to have the following format:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "request-id",
+  "method": "method-name",
+  "params": { /* parameters */ }
+}
 ```
 
-Run with stdio transport (for local development with Cursor):
+Responses follow this format:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "request-id",
+  "result": { /* result data */ }
+}
+```
+
+Or for errors:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "request-id",
+  "error": {
+    "code": -32000,
+    "message": "Error message",
+    "data": { /* optional additional data */ }
+  }
+}
+```
+
+### Setting Up Cursor Integration
+
+To set up integration with Cursor:
+
+1. In your Cursor settings, configure MCP:
+   - Set the transport to `stdio`
+   - Set the command to the path of your `run_cursor_integration.sh` script
+
+2. Ensure the script has execute permissions:
+   ```bash
+   chmod +x run_cursor_integration.sh
+   ```
+
+3. When using Cursor, the MCP server will start automatically and handle requests from the AI.
+
+### Available Tools
+
+The following tools are available through the MCP protocol:
+
+1. **execute_query** - Execute SQL queries
+   ```json
+   {
+     "name": "execute_query",
+     "sql": "SELECT * FROM users LIMIT 10"
+   }
+   ```
+
+2. **insert_data** - Insert data into a table
+   ```json
+   {
+     "name": "insert_data",
+     "table": "users",
+     "data": {
+       "name": "John Doe",
+       "email": "john@example.com"
+     }
+   }
+   ```
+
+3. **update_data** - Update data in a table
+   ```json
+   {
+     "name": "update_data",
+     "table": "users",
+     "data": {
+       "name": "Jane Doe"
+     },
+     "condition": "id = 1"
+   }
+   ```
+
+4. **delete_data** - Delete data from a table
+   ```json
+   {
+     "name": "delete_data",
+     "table": "users",
+     "condition": "id = 1"
+   }
+   ```
+
+## Transport Modes
+
+The server supports two transport modes for Cursor MCP:
+
+1. **stdio**: This mode is designed for direct integration with Cursor. The server reads requests from stdin and writes responses to stdout. All debug and log messages are written to stderr to avoid interfering with the protocol.
+
+2. **SSE (Server-Sent Events)**: This mode exposes an HTTP endpoint for Cursor to connect to. It's useful for remote server deployments or when the server needs to be shared between multiple clients.
+
+### Stdio Transport
+
+To use stdio transport:
 
 ```bash
 make run-stdio
 ```
 
-Run with SSE transport (for production):
+Or use the integration script:
+
+```bash
+./run_cursor_integration.sh
+```
+
+### SSE Transport
+
+To use SSE transport:
 
 ```bash
 make run-sse
 ```
 
-Run with MySQL (using .env for database credentials):
+Then configure Cursor to connect to `http://localhost:9090/sse`.
+
+## Troubleshooting
+
+### JSON-RPC Format Errors
+
+If you see errors like "Unexpected token 'T', 'transport' is not valid JSON", ensure:
+
+1. All debug/log messages are being sent to stderr, not stdout
+2. All JSON messages follow the JSON-RPC 2.0 format:
+   - Include the `jsonrpc: "2.0"` field
+   - Include an `id` field
+   - Use `method` and `params` fields properly
+   - Format error responses correctly with `code` and `message`
+
+### Transport Errors
+
+If you're having issues with transport:
+
+1. For stdio transport, ensure your integration script is properly configured and has execute permissions
+2. For SSE transport, check the server is running and accessible at the configured port
+3. Verify there are no port conflicts with other services
+
+### Testing Transport Modes
+
+#### Testing Stdio Mode
+
+You can test stdio mode by piping a JSON request:
 
 ```bash
-make run-mysql
+echo '{"jsonrpc": "2.0", "id": "test1", "method": "execute_tool", "params": {"name": "execute_query", "sql": "SELECT 1"}}' | ./server -transport stdio
 ```
 
-Add PostgreSQL support and run with PostgreSQL:
+#### Testing SSE Mode
 
-```bash
-make run-postgres
-```
+Visit `http://localhost:9090/test/sse` in your browser to test the SSE connection.
 
-Run with custom configuration (overrides .env):
+## Extending the Database Support
 
-```bash
-./mcp-server -port 8080 -db-type mysql -db-config "user:password@tcp(localhost:3306)/dbname" -transport sse
-```
+To add support for a new database system:
 
-## API Usage
+1. Create a new repository implementation in `internal/infrastructure/database/`
+2. Update the database factory in `internal/infrastructure/database/factory.go`
+3. Add any required dependencies to the `go.mod` file
+
+## API Usage (Standard Mode)
 
 ### Connect to SSE Events
 
@@ -139,117 +284,13 @@ Content-Type: application/json
 }
 ```
 
-Available methods:
+## Contributing
 
-- `execute_query`: Execute a SQL query
-  ```json
-  {
-    "sql": "SELECT * FROM users"
-  }
-  ```
-
-- `insert_data`: Insert data into a table
-  ```json
-  {
-    "table": "users",
-    "data": {
-      "name": "John Doe",
-      "email": "john@example.com"
-    }
-  }
-  ```
-
-- `update_data`: Update data in a table
-  ```json
-  {
-    "table": "users",
-    "data": {
-      "name": "Jane Doe"
-    },
-    "condition": "id = 1"
-  }
-  ```
-
-- `delete_data`: Delete data from a table
-  ```json
-  {
-    "table": "users",
-    "condition": "id = 1"
-  }
-  ```
-
-## Extending the Database Support
-
-To add support for a new database system:
-
-1. Create a new repository implementation in `internal/infrastructure/database/`
-2. Update the database factory in `internal/infrastructure/database/factory.go`
-3. Add any required dependencies to the `go.mod` file
-
-## Cursor Integration
-
-The server now supports integration with Cursor Editor through its Model Context Protocol (MCP). This allows using your database directly from Cursor's AI assistant.
-
-### Transport Modes
-
-The server supports two transport modes for Cursor MCP:
-
-1. **stdio**: For local development, where Cursor runs the server as a subprocess
-2. **SSE**: For production, where the server runs independently and Cursor connects via HTTP
-
-### Cursor MCP Endpoints
-
-For SSE transport mode, the server exposes dedicated endpoints:
-
-```
-http://localhost:9090/cursor-mcp  # Legacy endpoint
-http://localhost:9090/sse         # Standard SSE endpoint
-```
-
-### Setup in Cursor
-
-#### For stdio Transport (Local Development)
-
-In Cursor, configure the MCP server in `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "db-server": {
-      "command": "/path/to/mcp-server/server",
-      "args": ["-transport", "stdio"],
-      "env": {
-        "DB_TYPE": "mysql",
-        "DB_HOST": "localhost",
-        "DB_PORT": "3306",
-        "DB_USER": "your_username",
-        "DB_PASSWORD": "your_password",
-        "DB_NAME": "your_database"
-      }
-    }
-  }
-}
-```
-
-#### For SSE Transport (Production)
-
-In Cursor, configure the MCP server in `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "db-server": {
-      "url": "http://localhost:9090/sse"
-    }
-  }
-}
-```
-
-For detailed instructions on Cursor integration, see [docs/cursor-integration.md](docs/cursor-integration.md).
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License. 
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 
 ## 📧 Support & Contact

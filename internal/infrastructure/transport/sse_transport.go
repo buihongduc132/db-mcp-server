@@ -12,8 +12,8 @@ import (
 
 // SSETransport implements the transport repository interface for Server-Sent Events
 type SSETransport struct {
-	eventChan      chan *entities.MCPEvent
-	requestChan    chan *entities.MCPToolRequest
+	eventChan      chan interface{}
+	requestChan    chan interface{}
 	errorChan      chan error
 	responseWriter http.ResponseWriter
 	request        *http.Request
@@ -24,8 +24,8 @@ type SSETransport struct {
 // NewSSETransport creates a new SSE transport
 func NewSSETransport(w http.ResponseWriter, r *http.Request) *SSETransport {
 	return &SSETransport{
-		eventChan:      make(chan *entities.MCPEvent),
-		requestChan:    make(chan *entities.MCPToolRequest),
+		eventChan:      make(chan interface{}),
+		requestChan:    make(chan interface{}),
 		errorChan:      make(chan error),
 		responseWriter: w,
 		request:        r,
@@ -69,7 +69,7 @@ func (t *SSETransport) Start(ctx context.Context) error {
 	// Start goroutine to handle POST requests as tool requests
 	// Only handle POST requests with a request body
 	if t.request.Method == http.MethodPost && t.request.ContentLength > 0 {
-		go t.handleToolRequests()
+		go t.handleToolRequests(ctx)
 	} else {
 		log.Printf("Request is not a POST or has no body: %s %s", t.request.Method, t.request.URL.Path)
 	}
@@ -97,8 +97,8 @@ func (t *SSETransport) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Send sends an event to the client
-func (t *SSETransport) Send(event *entities.MCPEvent) error {
+// Send sends an event to the client (legacy method)
+func (t *SSETransport) Send(event interface{}) error {
 	t.mu.Lock()
 	if !t.started {
 		t.mu.Unlock()
@@ -110,8 +110,34 @@ func (t *SSETransport) Send(event *entities.MCPEvent) error {
 	return nil
 }
 
+// SendRaw sends a raw JSON string to the client as an SSE event
+func (t *SSETransport) SendRaw(jsonStr string) error {
+	t.mu.Lock()
+	if !t.started {
+		t.mu.Unlock()
+		return fmt.Errorf("transport not started")
+	}
+	t.mu.Unlock()
+
+	// Write the event to the response in SSE format
+	_, err := fmt.Fprintf(t.responseWriter, "data: %s\n\n", jsonStr)
+	if err != nil {
+		return fmt.Errorf("error writing raw JSON to SSE: %w", err)
+	}
+
+	// Flush the response to ensure the event is sent immediately
+	if flusher, ok := t.responseWriter.(http.Flusher); ok {
+		flusher.Flush()
+		log.Printf("Sent SSE raw JSON: %s", jsonStr)
+	} else {
+		return fmt.Errorf("response writer does not support flushing")
+	}
+
+	return nil
+}
+
 // Receive receives events from the client
-func (t *SSETransport) Receive() (<-chan *entities.MCPToolRequest, <-chan error) {
+func (t *SSETransport) Receive() (<-chan interface{}, <-chan error) {
 	return t.requestChan, t.errorChan
 }
 
@@ -122,50 +148,67 @@ func (t *SSETransport) handleEvents(ctx context.Context) {
 		case event, ok := <-t.eventChan:
 			if !ok {
 				// Channel closed
-				log.Println("Event channel closed, stopping SSE event handler")
 				return
 			}
 			if err := t.writeEvent(event); err != nil {
-				log.Printf("Error writing SSE event: %v", err)
+				log.Printf("Error writing event: %v", err)
 				t.errorChan <- err
-				return // Stop on write error
 			}
 		case <-ctx.Done():
-			log.Println("Context done, stopping SSE event handler")
-			return
-		case <-t.request.Context().Done():
-			log.Println("Client disconnected, stopping SSE event handler")
+			log.Println("Context done, stopping SSE events handler")
 			return
 		}
 	}
 }
 
-// handleToolRequests handles tool requests from the client
-func (t *SSETransport) handleToolRequests() {
-	if t.request.Body == nil {
-		log.Println("Request body is nil, cannot handle tool requests")
-		t.errorChan <- fmt.Errorf("request body is nil")
-		return
-	}
-
-	log.Printf("Processing tool request from %s", t.request.RemoteAddr)
-
+// handleToolRequests handles tool requests coming from the client
+func (t *SSETransport) handleToolRequests(ctx context.Context) {
+	// For SSE, we only get one request body
+	// Parse it as a JSON-RPC 2.0 request
+	var request entities.MCPToolRequest
 	decoder := json.NewDecoder(t.request.Body)
 	defer t.request.Body.Close()
 
-	var toolRequest entities.MCPToolRequest
-	if err := decoder.Decode(&toolRequest); err != nil {
-		log.Printf("Error decoding tool request: %v", err)
-		t.errorChan <- fmt.Errorf("error decoding tool request: %w", err)
+	if err := decoder.Decode(&request); err != nil {
+		log.Printf("Error parsing tool request: %v", err)
+		t.errorChan <- fmt.Errorf("error parsing tool request: %w", err)
+
+		// Send a properly formatted JSON-RPC error response
+		errorResponse := &entities.MCPToolResponse{
+			JsonRPC: entities.JSONRPCVersion,
+			ID:      "null", // We don't know the ID
+			Error: &entities.MCPError{
+				Code:    entities.ErrorCodeParseError,
+				Message: fmt.Sprintf("Invalid JSON: %v", err),
+			},
+		}
+		errorJSON, _ := json.Marshal(errorResponse)
+		t.SendRaw(string(errorJSON))
 		return
 	}
 
-	log.Printf("Received tool request: %s (ID: %s)", toolRequest.Name, toolRequest.ID)
-	t.requestChan <- &toolRequest
+	// Validate JSON-RPC 2.0 format
+	if request.JsonRPC != entities.JSONRPCVersion {
+		log.Printf("Invalid JSON-RPC version: %s", request.JsonRPC)
+		errorResponse := &entities.MCPToolResponse{
+			JsonRPC: entities.JSONRPCVersion,
+			ID:      request.ID,
+			Error: &entities.MCPError{
+				Code:    entities.ErrorCodeInvalidRequest,
+				Message: fmt.Sprintf("Invalid JSON-RPC version, expected %s", entities.JSONRPCVersion),
+			},
+		}
+		errorJSON, _ := json.Marshal(errorResponse)
+		t.SendRaw(string(errorJSON))
+		return
+	}
+
+	log.Printf("Received tool request: %s (ID: %s)", request.Method, request.ID)
+	t.requestChan <- &request
 }
 
 // writeEvent writes an event to the response
-func (t *SSETransport) writeEvent(event *entities.MCPEvent) error {
+func (t *SSETransport) writeEvent(event interface{}) error {
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("error marshaling event: %w", err)

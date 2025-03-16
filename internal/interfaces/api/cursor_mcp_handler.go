@@ -30,14 +30,14 @@ func (h *CursorMCPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*") // Allow cross-origin requests
 
 	// Create a channel for events
-	eventChan := make(chan *entities.MCPEvent)
+	eventChan := make(chan interface{})
 
 	// Send initial tools event
 	go func() {
 		toolsEvent, err := h.mcpUseCase.GetToolsEvent(r.Context())
 		if err != nil {
 			log.Printf("Error getting tools: %v", err)
-			eventChan <- createErrorEvent(err)
+			eventChan <- createErrorResponse("", err)
 			return
 		}
 		eventChan <- toolsEvent
@@ -62,7 +62,7 @@ func (h *CursorMCPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleToolRequests handles tool requests from the Cursor client
-func (h *CursorMCPHandler) handleToolRequests(r *http.Request, eventChan chan *entities.MCPEvent) {
+func (h *CursorMCPHandler) handleToolRequests(r *http.Request, eventChan chan interface{}) {
 	// Check for POST data in the request body
 	if r.Method == http.MethodPost {
 		decoder := json.NewDecoder(r.Body)
@@ -72,7 +72,15 @@ func (h *CursorMCPHandler) handleToolRequests(r *http.Request, eventChan chan *e
 		var toolRequest entities.MCPToolRequest
 		if err := decoder.Decode(&toolRequest); err != nil {
 			log.Printf("Error decoding tool request: %v", err)
-			eventChan <- createErrorEvent(err)
+			eventChan <- createErrorResponse("", err)
+			return
+		}
+
+		// Validate JSON-RPC 2.0 format
+		if toolRequest.JsonRPC != entities.JSONRPCVersion {
+			errorMsg := fmt.Sprintf("Invalid JSON-RPC version: expected %s", entities.JSONRPCVersion)
+			log.Print(errorMsg)
+			eventChan <- createErrorResponse(toolRequest.ID, fmt.Errorf(errorMsg))
 			return
 		}
 
@@ -80,7 +88,7 @@ func (h *CursorMCPHandler) handleToolRequests(r *http.Request, eventChan chan *e
 		responseEvent, err := h.mcpUseCase.ExecuteTool(r.Context(), &toolRequest)
 		if err != nil {
 			log.Printf("Error executing tool: %v", err)
-			eventChan <- createErrorEvent(err)
+			eventChan <- createErrorResponse(toolRequest.ID, err)
 			return
 		}
 
@@ -90,7 +98,7 @@ func (h *CursorMCPHandler) handleToolRequests(r *http.Request, eventChan chan *e
 }
 
 // writeEvent writes an event to the response
-func (h *CursorMCPHandler) writeEvent(w http.ResponseWriter, event *entities.MCPEvent) error {
+func (h *CursorMCPHandler) writeEvent(w http.ResponseWriter, event interface{}) error {
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("error marshaling event: %w", err)
@@ -105,12 +113,14 @@ func (h *CursorMCPHandler) writeEvent(w http.ResponseWriter, event *entities.MCP
 	return nil
 }
 
-// createErrorEvent creates an error event
-func createErrorEvent(err error) *entities.MCPEvent {
-	return &entities.MCPEvent{
-		Type: "error",
-		Payload: map[string]string{
-			"error": err.Error(),
+// createErrorResponse creates a JSON-RPC 2.0 error response
+func createErrorResponse(id string, err error) *entities.MCPToolResponse {
+	return &entities.MCPToolResponse{
+		JsonRPC: entities.JSONRPCVersion,
+		ID:      id,
+		Error: &entities.MCPError{
+			Code:    entities.ErrorCodeInternalError,
+			Message: err.Error(),
 		},
 	}
 }

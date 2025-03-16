@@ -15,8 +15,8 @@ import (
 
 // StdioTransport implements the transport repository interface for stdio
 type StdioTransport struct {
-	eventChan   chan *entities.MCPEvent
-	requestChan chan *entities.MCPToolRequest
+	eventChan   chan interface{}
+	requestChan chan interface{}
 	errorChan   chan error
 	reader      *bufio.Reader
 	writer      io.Writer
@@ -26,9 +26,12 @@ type StdioTransport struct {
 
 // NewStdioTransport creates a new stdio transport
 func NewStdioTransport() *StdioTransport {
+	// Set log output to stderr for all logging to avoid corrupting stdout JSON
+	log.SetOutput(os.Stderr)
+
 	return &StdioTransport{
-		eventChan:   make(chan *entities.MCPEvent),
-		requestChan: make(chan *entities.MCPToolRequest),
+		eventChan:   make(chan interface{}),
+		requestChan: make(chan interface{}),
 		errorChan:   make(chan error),
 		reader:      bufio.NewReader(os.Stdin),
 		writer:      os.Stdout,
@@ -45,10 +48,8 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 		return fmt.Errorf("transport already started")
 	}
 
-	log.Println("Starting stdio transport...")
-
-	// Immediately send a diagnostic message to stderr (won't interfere with protocol)
-	fmt.Fprintln(os.Stderr, "Stdio transport started and waiting for input...")
+	// Log to stderr only
+	fmt.Fprintln(os.Stderr, "Starting stdio transport...")
 
 	// Start goroutine to handle outgoing events (writing to stdout)
 	go t.handleEvents(ctx)
@@ -69,7 +70,8 @@ func (t *StdioTransport) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	log.Println("Stopping stdio transport...")
+	// Log to stderr only
+	fmt.Fprintln(os.Stderr, "Stopping stdio transport...")
 
 	close(t.eventChan)
 	close(t.requestChan)
@@ -79,8 +81,8 @@ func (t *StdioTransport) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Send sends an event to the client
-func (t *StdioTransport) Send(event *entities.MCPEvent) error {
+// Send sends an event to the client (legacy method)
+func (t *StdioTransport) Send(event interface{}) error {
 	t.mu.Lock()
 	if !t.started {
 		t.mu.Unlock()
@@ -92,8 +94,28 @@ func (t *StdioTransport) Send(event *entities.MCPEvent) error {
 	return nil
 }
 
+// SendRaw sends a raw JSON string to the client
+func (t *StdioTransport) SendRaw(jsonStr string) error {
+	t.mu.Lock()
+	if !t.started {
+		t.mu.Unlock()
+		return fmt.Errorf("transport not started")
+	}
+	t.mu.Unlock()
+
+	// Write directly to stdout without additional processing
+	_, err := fmt.Fprintln(t.writer, jsonStr)
+	if err != nil {
+		return fmt.Errorf("error writing raw JSON: %w", err)
+	}
+
+	// Log to stderr for debugging
+	fmt.Fprintf(os.Stderr, "Sent raw JSON: %s\n", jsonStr)
+	return nil
+}
+
 // Receive receives events from the client
-func (t *StdioTransport) Receive() (<-chan *entities.MCPToolRequest, <-chan error) {
+func (t *StdioTransport) Receive() (<-chan interface{}, <-chan error) {
 	return t.requestChan, t.errorChan
 }
 
@@ -157,33 +179,61 @@ func (t *StdioTransport) handleRequests(ctx context.Context) {
 			// Log to stderr so it doesn't interfere with protocol
 			fmt.Fprintf(os.Stderr, "Received request: %s\n", line)
 
-			// Parse the request
-			var toolRequest entities.MCPToolRequest
-			if err := json.Unmarshal([]byte(line), &toolRequest); err != nil {
+			// Parse the request as a JSON-RPC 2.0 message
+			var request entities.MCPToolRequest
+			if err := json.Unmarshal([]byte(line), &request); err != nil {
 				// Log to stderr so it doesn't interfere with protocol
 				fmt.Fprintf(os.Stderr, "Error parsing request: %v, input: %s\n", err, line)
 				t.errorChan <- fmt.Errorf("error parsing request: %w", err)
+
+				// Send a properly formatted JSON-RPC error response
+				errorResponse := &entities.MCPToolResponse{
+					JsonRPC: entities.JSONRPCVersion,
+					ID:      "null", // We don't know the ID
+					Error: &entities.MCPError{
+						Code:    entities.ErrorCodeParseError,
+						Message: fmt.Sprintf("Invalid JSON: %v", err),
+					},
+				}
+				errorJSON, _ := json.Marshal(errorResponse)
+				t.SendRaw(string(errorJSON))
 				continue
 			}
 
 			// Log to stderr so it doesn't interfere with protocol
-			fmt.Fprintf(os.Stderr, "Parsed tool request: %s\n", toolRequest.Name)
+			fmt.Fprintf(os.Stderr, "Parsed tool request: %s\n", request.Method)
+
+			// Validate JSON-RPC 2.0 format
+			if request.JsonRPC != entities.JSONRPCVersion {
+				fmt.Fprintf(os.Stderr, "Invalid JSON-RPC version: %s\n", request.JsonRPC)
+				errorResponse := &entities.MCPToolResponse{
+					JsonRPC: entities.JSONRPCVersion,
+					ID:      request.ID,
+					Error: &entities.MCPError{
+						Code:    entities.ErrorCodeInvalidRequest,
+						Message: fmt.Sprintf("Invalid JSON-RPC version, expected %s", entities.JSONRPCVersion),
+					},
+				}
+				errorJSON, _ := json.Marshal(errorResponse)
+				t.SendRaw(string(errorJSON))
+				continue
+			}
 
 			// Send the request to the channel
-			t.requestChan <- &toolRequest
+			t.requestChan <- &request
 		}
 	}
 }
 
 // writeEvent writes an event to the writer (stdout)
-func (t *StdioTransport) writeEvent(event *entities.MCPEvent) error {
+func (t *StdioTransport) writeEvent(event interface{}) error {
 	eventJSON, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("error marshaling event: %w", err)
 	}
 
 	// Write the event to stdout without any extra formatting
-	// This ensures Cursor can parse it correctly
+	// This ensures Cursor can parse it correctly - avoid any extraneous output
 	_, err = fmt.Fprintln(t.writer, string(eventJSON))
 	if err != nil {
 		return err

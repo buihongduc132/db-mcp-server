@@ -103,20 +103,27 @@ func (r *DatabaseToolRepository) GetAllTools(ctx context.Context) ([]entities.MC
 // ExecuteTool executes a tool and returns the result
 func (r *DatabaseToolRepository) ExecuteTool(ctx context.Context, request entities.MCPToolRequest) (*entities.MCPToolResponse, error) {
 	response := &entities.MCPToolResponse{
-		ID:     request.ID,
-		Status: "success",
+		JsonRPC: entities.JSONRPCVersion,
+		ID:      request.ID,
+		Result:  nil,
 	}
 
-	switch request.Name {
+	// Extract the tool name from the parameters
+	toolName, ok := request.Parameters["name"].(string)
+	if !ok {
+		return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeInvalidParams, "Missing or invalid 'name' parameter"), nil
+	}
+
+	switch toolName {
 	case "execute_query":
 		sql, ok := request.Parameters["sql"].(string)
 		if !ok {
-			return createErrorResponse(request.ID, "Parameter 'sql' must be a string"), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeInvalidParams, "Parameter 'sql' must be a string"), nil
 		}
 
 		results, err := r.dbRepo.ExecuteQuery(ctx, sql)
 		if err != nil {
-			return createErrorResponse(request.ID, fmt.Sprintf("Query error: %v", err)), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeToolExecutionFailed, fmt.Sprintf("Query error: %v", err)), nil
 		}
 
 		response.Result = results
@@ -124,17 +131,17 @@ func (r *DatabaseToolRepository) ExecuteTool(ctx context.Context, request entiti
 	case "insert_data":
 		table, ok := request.Parameters["table"].(string)
 		if !ok {
-			return createErrorResponse(request.ID, "Parameter 'table' must be a string"), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeInvalidParams, "Parameter 'table' must be a string"), nil
 		}
 
 		dataParam, ok := request.Parameters["data"].(map[string]interface{})
 		if !ok {
-			return createErrorResponse(request.ID, "Parameter 'data' must be an object"), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeInvalidParams, "Parameter 'data' must be an object"), nil
 		}
 
 		id, err := r.dbRepo.InsertData(ctx, table, dataParam)
 		if err != nil {
-			return createErrorResponse(request.ID, fmt.Sprintf("Insert error: %v", err)), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeToolExecutionFailed, fmt.Sprintf("Insert error: %v", err)), nil
 		}
 
 		response.Result = map[string]int64{"inserted_id": id}
@@ -142,22 +149,22 @@ func (r *DatabaseToolRepository) ExecuteTool(ctx context.Context, request entiti
 	case "update_data":
 		table, ok := request.Parameters["table"].(string)
 		if !ok {
-			return createErrorResponse(request.ID, "Parameter 'table' must be a string"), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeInvalidParams, "Parameter 'table' must be a string"), nil
 		}
 
 		dataParam, ok := request.Parameters["data"].(map[string]interface{})
 		if !ok {
-			return createErrorResponse(request.ID, "Parameter 'data' must be an object"), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeInvalidParams, "Parameter 'data' must be an object"), nil
 		}
 
 		condition, ok := request.Parameters["condition"].(string)
 		if !ok {
-			return createErrorResponse(request.ID, "Parameter 'condition' must be a string"), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeInvalidParams, "Parameter 'condition' must be a string"), nil
 		}
 
 		affected, err := r.dbRepo.UpdateData(ctx, table, dataParam, condition)
 		if err != nil {
-			return createErrorResponse(request.ID, fmt.Sprintf("Update error: %v", err)), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeToolExecutionFailed, fmt.Sprintf("Update error: %v", err)), nil
 		}
 
 		response.Result = map[string]int64{"rows_affected": affected}
@@ -165,33 +172,36 @@ func (r *DatabaseToolRepository) ExecuteTool(ctx context.Context, request entiti
 	case "delete_data":
 		table, ok := request.Parameters["table"].(string)
 		if !ok {
-			return createErrorResponse(request.ID, "Parameter 'table' must be a string"), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeInvalidParams, "Parameter 'table' must be a string"), nil
 		}
 
 		condition, ok := request.Parameters["condition"].(string)
 		if !ok {
-			return createErrorResponse(request.ID, "Parameter 'condition' must be a string"), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeInvalidParams, "Parameter 'condition' must be a string"), nil
 		}
 
 		affected, err := r.dbRepo.DeleteData(ctx, table, condition)
 		if err != nil {
-			return createErrorResponse(request.ID, fmt.Sprintf("Delete error: %v", err)), nil
+			return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeToolExecutionFailed, fmt.Sprintf("Delete error: %v", err)), nil
 		}
 
 		response.Result = map[string]int64{"rows_affected": affected}
 
 	default:
-		return createErrorResponse(request.ID, fmt.Sprintf("Unknown tool: %s", request.Name)), nil
+		return createJsonRpcErrorResponse(request.ID, entities.ErrorCodeMethodNotFound, fmt.Sprintf("Unknown tool: %s", toolName)), nil
 	}
 
 	return response, nil
 }
 
-// createErrorResponse creates an error response for a tool request
-func createErrorResponse(id, errorMsg string) *entities.MCPToolResponse {
+// createJsonRpcErrorResponse creates a JSON-RPC 2.0 error response
+func createJsonRpcErrorResponse(id string, code int, message string) *entities.MCPToolResponse {
 	return &entities.MCPToolResponse{
-		ID:     id,
-		Status: "error",
-		Error:  errorMsg,
+		JsonRPC: entities.JSONRPCVersion,
+		ID:      id,
+		Error: &entities.MCPError{
+			Code:    code,
+			Message: message,
+		},
 	}
 }
