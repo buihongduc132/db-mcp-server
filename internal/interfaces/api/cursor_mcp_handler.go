@@ -3,13 +3,15 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"mcpserver/internal/domain/entities"
 	"mcpserver/internal/usecase"
 	"net/http"
+	"os"
 )
 
-// CursorMCPHandler handles Cursor MCP protocol requests over SSE
+// CursorMCPHandler handles Cursor MCP protocol requests over HTTP
 type CursorMCPHandler struct {
 	mcpUseCase *usecase.CursorMCPUseCase
 }
@@ -23,104 +25,104 @@ func NewCursorMCPHandler(mcpUseCase *usecase.CursorMCPUseCase) *CursorMCPHandler
 
 // ServeHTTP handles HTTP requests for Cursor MCP
 func (h *CursorMCPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Set SSE headers
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*") // Allow cross-origin requests
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
-	// Create a channel for events
-	eventChan := make(chan interface{})
-
-	// Send initial tools event
-	go func() {
-		toolsEvent, err := h.mcpUseCase.GetToolsEvent(r.Context())
-		if err != nil {
-			log.Printf("Error getting tools: %v", err)
-			eventChan <- createErrorResponse("", err)
-			return
-		}
-		eventChan <- toolsEvent
-	}()
-
-	// Listen for tool requests on a separate goroutine
-	go h.handleToolRequests(r, eventChan)
-
-	// Write events to response
-	for {
-		select {
-		case event := <-eventChan:
-			if err := h.writeEvent(w, event); err != nil {
-				log.Printf("Error writing event: %v", err)
-				return
-			}
-		case <-r.Context().Done():
-			log.Println("Client disconnected")
-			return
-		}
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
 	}
-}
 
-// handleToolRequests handles tool requests from the Cursor client
-func (h *CursorMCPHandler) handleToolRequests(r *http.Request, eventChan chan interface{}) {
-	// Check for POST data in the request body
+	// Set JSON content type
+	w.Header().Set("Content-Type", "application/json")
+
+	// Handle GET requests (tools listing)
+	if r.Method == http.MethodGet {
+		h.handleToolsListing(w, r)
+		return
+	}
+
+	// Handle POST requests (tool execution)
 	if r.Method == http.MethodPost {
-		decoder := json.NewDecoder(r.Body)
-		defer r.Body.Close()
-
-		// Handle as a tool request
-		var toolRequest entities.MCPToolRequest
-		if err := decoder.Decode(&toolRequest); err != nil {
-			log.Printf("Error decoding tool request: %v", err)
-			eventChan <- createErrorResponse("", err)
-			return
-		}
-
-		// Validate JSON-RPC 2.0 format
-		if toolRequest.JsonRPC != entities.JSONRPCVersion {
-			errorMsg := fmt.Sprintf("Invalid JSON-RPC version: expected %s", entities.JSONRPCVersion)
-			log.Print(errorMsg)
-			eventChan <- createErrorResponse(toolRequest.ID, fmt.Errorf(errorMsg))
-			return
-		}
-
-		// Execute the tool
-		responseEvent, err := h.mcpUseCase.ExecuteTool(r.Context(), &toolRequest)
-		if err != nil {
-			log.Printf("Error executing tool: %v", err)
-			eventChan <- createErrorResponse(toolRequest.ID, err)
-			return
-		}
-
-		// Send the response
-		eventChan <- responseEvent
+		h.handleToolExecution(w, r)
+		return
 	}
+
+	// Method not allowed
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 }
 
-// writeEvent writes an event to the response
-func (h *CursorMCPHandler) writeEvent(w http.ResponseWriter, event interface{}) error {
-	eventJSON, err := json.Marshal(event)
+// handleToolsListing handles GET requests for tools listing
+func (h *CursorMCPHandler) handleToolsListing(w http.ResponseWriter, r *http.Request) {
+	// Get tools event
+	toolsEvent, err := h.mcpUseCase.GetToolsEvent(r.Context())
 	if err != nil {
-		return fmt.Errorf("error marshaling event: %w", err)
+		log.Printf("Error getting tools: %v", err)
+		http.Error(w, fmt.Sprintf("Error getting tools: %v", err), http.StatusInternalServerError)
+		return
 	}
 
-	// Write the event to the response
-	fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
+	// Debug: Print the tools event
+	jsonBytes, _ := json.MarshalIndent(toolsEvent, "", "  ")
+	fmt.Fprintf(os.Stderr, "DEBUG - Sending tools event:\n%s\n", string(jsonBytes))
 
-	return nil
+	// Write response
+	if err := json.NewEncoder(w).Encode(toolsEvent); err != nil {
+		log.Printf("Error encoding tools event: %v", err)
+		http.Error(w, fmt.Sprintf("Error encoding tools event: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
-// createErrorResponse creates a JSON-RPC 2.0 error response
-func createErrorResponse(id string, err error) *entities.MCPToolResponse {
-	return &entities.MCPToolResponse{
-		JsonRPC: entities.JSONRPCVersion,
-		ID:      id,
-		Error: &entities.MCPError{
-			Code:    entities.ErrorCodeInternalError,
-			Message: err.Error(),
-		},
+// handleToolExecution handles POST requests for tool execution
+func (h *CursorMCPHandler) handleToolExecution(w http.ResponseWriter, r *http.Request) {
+	// Read request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Error reading request body: %v", err)
+		http.Error(w, fmt.Sprintf("Error reading request body: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// Debug: Print the request body
+	fmt.Fprintf(os.Stderr, "DEBUG - Received tool request:\n%s\n", string(body))
+
+	// Parse tool request
+	var toolRequest entities.MCPToolRequest
+	if err := json.Unmarshal(body, &toolRequest); err != nil {
+		log.Printf("Error parsing tool request: %v", err)
+		http.Error(w, fmt.Sprintf("Error parsing tool request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate JSON-RPC 2.0 format
+	if toolRequest.JsonRPC != entities.JSONRPCVersion {
+		errorMsg := fmt.Sprintf("Invalid JSON-RPC version: expected %s", entities.JSONRPCVersion)
+		log.Print(errorMsg)
+		http.Error(w, errorMsg, http.StatusBadRequest)
+		return
+	}
+
+	// Execute the tool
+	response, err := h.mcpUseCase.ExecuteTool(r.Context(), &toolRequest)
+	if err != nil {
+		log.Printf("Error executing tool: %v", err)
+		http.Error(w, fmt.Sprintf("Error executing tool: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Debug: Print the response
+	responseBytes, _ := json.MarshalIndent(response, "", "  ")
+	fmt.Fprintf(os.Stderr, "DEBUG - Sending tool response:\n%s\n", string(responseBytes))
+
+	// Write response
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error encoding tool response: %v", err)
+		http.Error(w, fmt.Sprintf("Error encoding tool response: %v", err), http.StatusInternalServerError)
+		return
 	}
 }

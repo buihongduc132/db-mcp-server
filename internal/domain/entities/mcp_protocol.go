@@ -2,16 +2,24 @@ package entities
 
 // MCPToolDefinition defines a tool that can be used by Cursor
 type MCPToolDefinition struct {
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Schema      MCPParameterSchema `json:"schema"`
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	InputSchema interface{} `json:"inputSchema"`
+}
+
+// MCPToolArgument represents a named argument for a tool
+type MCPToolArgument struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	Required    bool        `json:"required"`
+	Schema      interface{} `json:"schema,omitempty"`
 }
 
 // MCPParameterSchema defines the schema for tool parameters
 type MCPParameterSchema struct {
 	Type       string                       `json:"type"`
 	Properties map[string]MCPPropertySchema `json:"properties"`
-	Required   []string                     `json:"required"`
+	Required   []string                     `json:"required,omitempty"`
 }
 
 // MCPPropertySchema defines the schema for a property in a tool parameter
@@ -22,10 +30,10 @@ type MCPPropertySchema struct {
 
 // MCPToolRequest defines a request from Cursor to execute a tool
 type MCPToolRequest struct {
-	JsonRPC    string                 `json:"jsonrpc"` // Must be "2.0"
-	ID         string                 `json:"id"`
-	Method     string                 `json:"method"` // Should be "execute_tool"
-	Parameters map[string]interface{} `json:"params"` // Note: changed from "parameters" to "params"
+	JsonRPC string                 `json:"jsonrpc"` // Must be "2.0"
+	ID      string                 `json:"id"`
+	Method  string                 `json:"method"` // Should be "tools/call"
+	Params  map[string]interface{} `json:"params"` // Following JSON-RPC spec, this should be "params" not "parameters"
 }
 
 // MCPToolResponse defines a response to a tool execution request
@@ -45,21 +53,27 @@ type MCPError struct {
 
 // MCPToolsEvent is sent to inform Cursor about available tools
 type MCPToolsEvent struct {
-	JsonRPC string              `json:"jsonrpc"` // Must be "2.0"
-	Method  string              `json:"method"`  // Should be "tools_available"
-	Params  MCPToolsEventParams `json:"params"`
+	JsonRPC string `json:"jsonrpc"` // Must be "2.0"
+	ID      string `json:"id,omitempty"`
+	Method  string `json:"method"` // Should be "tools/list"
+	Result  struct {
+		Tools []MCPToolDefinition `json:"tools"`
+	} `json:"result"` // For successful response
 }
 
-// MCPToolsEventParams contains the parameters for a tools event
-type MCPToolsEventParams struct {
-	Tools []MCPToolDefinition `json:"tools"`
+// MCPListToolsRequest defines a request from Cursor to list tools
+type MCPListToolsRequest struct {
+	JsonRPC string                 `json:"jsonrpc"` // Must be "2.0"
+	ID      string                 `json:"id"`
+	Method  string                 `json:"method"` // Should be "tools/list"
+	Params  map[string]interface{} `json:"params,omitempty"`
 }
 
 // Constants for method names and jsonrpc version
 const (
-	JSONRPCVersion       = "2.0"
-	MethodToolsAvailable = "tools_available"
-	MethodExecuteTool    = "execute_tool"
+	JSONRPCVersion  = "2.0"
+	MethodToolsList = "tools/list"
+	MethodToolsCall = "tools/call"
 )
 
 // Error codes according to JSON-RPC 2.0 spec

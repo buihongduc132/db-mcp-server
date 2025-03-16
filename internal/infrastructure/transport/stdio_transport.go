@@ -225,22 +225,77 @@ func (t *StdioTransport) handleRequests(ctx context.Context) {
 	}
 }
 
-// writeEvent writes an event to the writer (stdout)
+// validateToolsEvent validates the format of a tools event to ensure it matches
+// what Cursor expects. This is strictly for debugging purposes.
+func validateToolsEvent(toolsEvent *entities.MCPToolsEvent) error {
+	if toolsEvent.JsonRPC != entities.JSONRPCVersion {
+		return fmt.Errorf("incorrect jsonrpc version: %s, expected: %s", toolsEvent.JsonRPC, entities.JSONRPCVersion)
+	}
+
+	if toolsEvent.Method != entities.MethodToolsList {
+		return fmt.Errorf("incorrect method: %s, expected: %s", toolsEvent.Method, entities.MethodToolsList)
+	}
+
+	if len(toolsEvent.Result.Tools) == 0 {
+		return fmt.Errorf("no tools defined in the event")
+	}
+
+	// Check each tool for correct format
+	for i, tool := range toolsEvent.Result.Tools {
+		if tool.Name == "" {
+			return fmt.Errorf("tool at index %d has no name", i)
+		}
+
+		// Check that InputSchema is defined
+		if tool.InputSchema == nil {
+			return fmt.Errorf("tool '%s' has no input schema defined", tool.Name)
+		}
+	}
+
+	return nil
+}
+
+// writeEvent marshals and writes an event to the writer
 func (t *StdioTransport) writeEvent(event interface{}) error {
-	eventJSON, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("error marshaling event: %w", err)
+	var jsonBytes []byte
+	var err error
+
+	// Log type of event for debugging
+	eventType := fmt.Sprintf("%T", event)
+	fmt.Fprintf(os.Stderr, "Writing event of type: %s\n", eventType)
+
+	// Special handling for tools event to ensure correct format
+	if toolsEvent, ok := event.(*entities.MCPToolsEvent); ok {
+		// Log for debugging
+		fmt.Fprintf(os.Stderr, "Processing tools event with %d tools\n", len(toolsEvent.Result.Tools))
+
+		// Validate the tools event format
+		if err := validateToolsEvent(toolsEvent); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: Invalid tools event format: %v\n", err)
+			// Continue anyway, but log the warning
+		}
+
+		// Ensure the event is properly formatted for Cursor
+		// The key issue is making sure the "params" field has a "tools" array
+		jsonBytes, err = json.Marshal(toolsEvent)
+		if err != nil {
+			return fmt.Errorf("error marshaling tools event: %w", err)
+		}
+
+		// Log the JSON for debugging
+		fmt.Fprintf(os.Stderr, "Tools event JSON: %s\n", string(jsonBytes))
+	} else {
+		// For other event types
+		jsonBytes, err = json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("error marshaling event: %w", err)
+		}
 	}
 
-	// Write the event to stdout without any extra formatting
-	// This ensures Cursor can parse it correctly - avoid any extraneous output
-	_, err = fmt.Fprintln(t.writer, string(eventJSON))
-	if err != nil {
-		return err
+	// Write the JSON to stdout
+	if _, err := fmt.Fprintln(t.writer, string(jsonBytes)); err != nil {
+		return fmt.Errorf("error writing event: %w", err)
 	}
-
-	// Log to stderr for debugging (won't interfere with protocol)
-	fmt.Fprintf(os.Stderr, "Sent event: %s\n", string(eventJSON))
 
 	return nil
 }

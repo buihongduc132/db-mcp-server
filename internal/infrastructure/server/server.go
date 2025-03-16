@@ -63,32 +63,16 @@ func NewServer(cfg Config, dbRepo repositories.DBRepository) (*MCPServer, error)
 	// Cursor MCP protocol endpoint
 	mux.Handle("/cursor-mcp", cursorHandler)
 
-	// Add SSE endpoint for Cursor MCP protocol
-	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
-		// Create SSE transport
-		transportFactory := transport.NewFactory()
-		sseTransport, err := transportFactory.CreateTransport(config.SSETransport, w, r)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to create transport: %v", err), http.StatusInternalServerError)
-			return
+	// Add debug endpoint to check server status
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		uptime := time.Since(time.Now())
+		status := map[string]interface{}{
+			"status":  "ok",
+			"uptime":  uptime.String(),
+			"version": "1.0.0",
 		}
-
-		// Create transport use case
-		transportUseCase := usecase.NewTransportUseCase(sseTransport, cursorMCPUseCase)
-
-		// Start transport
-		if err := transportUseCase.Start(r.Context()); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to start transport: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		// Wait for client to disconnect
-		<-r.Context().Done()
-
-		// Stop transport
-		if err := transportUseCase.Stop(context.Background()); err != nil {
-			log.Printf("Error stopping transport: %v", err)
-		}
+		json.NewEncoder(w).Encode(status)
 	})
 
 	httpServer := &http.Server{
@@ -121,7 +105,6 @@ func (s *MCPServer) Start() error {
 
 	log.Printf("Server starting on %s", s.httpServer.Addr)
 	log.Printf("Cursor MCP endpoint available at http://localhost%s/cursor-mcp", s.httpServer.Addr)
-	log.Printf("SSE endpoint available at http://localhost%s/sse", s.httpServer.Addr)
 
 	// If using stdio transport, start it in a separate goroutine
 	if s.transportMode == config.StdioTransport {
@@ -162,7 +145,7 @@ func (s *MCPServer) Start() error {
 		select {}
 	}
 
-	// Otherwise, start the HTTP server for SSE mode
+	// Otherwise, start the HTTP server
 	log.Println("Starting in SSE transport mode...")
 	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("HTTP server error: %w", err)

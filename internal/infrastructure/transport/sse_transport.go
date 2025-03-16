@@ -7,6 +7,7 @@ import (
 	"log"
 	"mcpserver/internal/domain/entities"
 	"net/http"
+	"os"
 	"sync"
 )
 
@@ -209,23 +210,42 @@ func (t *SSETransport) handleToolRequests(ctx context.Context) {
 
 // writeEvent writes an event to the response
 func (t *SSETransport) writeEvent(event interface{}) error {
-	eventJSON, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("error marshaling event: %w", err)
+	var jsonBytes []byte
+	var err error
+
+	// Log type of event for debugging
+	eventType := fmt.Sprintf("%T", event)
+	fmt.Fprintf(os.Stderr, "Writing SSE event of type: %s\n", eventType)
+
+	// Special handling for tools event to ensure correct format
+	if toolsEvent, ok := event.(*entities.MCPToolsEvent); ok {
+		// Log for debugging
+		fmt.Fprintf(os.Stderr, "Processing SSE tools event with %d tools\n", len(toolsEvent.Result.Tools))
+
+		// Ensure the event is properly formatted for Cursor
+		jsonBytes, err = json.Marshal(toolsEvent)
+		if err != nil {
+			return fmt.Errorf("error marshaling tools event: %w", err)
+		}
+
+		// Log the JSON for debugging
+		fmt.Fprintf(os.Stderr, "SSE Tools event JSON: %s\n", string(jsonBytes))
+	} else {
+		// For other event types
+		jsonBytes, err = json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("error marshaling event: %w", err)
+		}
 	}
 
 	// Write the event to the response in SSE format
-	_, err = fmt.Fprintf(t.responseWriter, "data: %s\n\n", string(eventJSON))
-	if err != nil {
-		return fmt.Errorf("error writing to response: %w", err)
+	if _, err := fmt.Fprintf(t.responseWriter, "data: %s\n\n", string(jsonBytes)); err != nil {
+		return fmt.Errorf("error writing SSE event: %w", err)
 	}
 
-	// Flush the response to ensure the event is sent immediately
+	// Flush the response
 	if flusher, ok := t.responseWriter.(http.Flusher); ok {
 		flusher.Flush()
-		log.Printf("Sent SSE event: %s", string(eventJSON))
-	} else {
-		return fmt.Errorf("response writer does not support flushing")
 	}
 
 	return nil

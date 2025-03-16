@@ -305,3 +305,263 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 alt="Buy Me A Coffee"/>
 </a>
 </p>
+
+## Setting up with Cursor
+
+To use this MCP server with Cursor and fix the "No tools valiables" error, follow these steps:
+
+1. Configure the MCP server to use stdio transport mode:
+   - Edit the `.env` file and set `TRANSPORT_MODE=stdio` 
+   - Or use the `--transport=stdio` flag when running the server
+
+2. Build and run the MCP server:
+   ```bash
+   # Make the run script executable
+   chmod +x run_cursor_integration.sh
+   
+   # Run the script
+   ./run_cursor_integration.sh
+   ```
+
+3. Configure Cursor to use this MCP server:
+   - Open Cursor Settings
+   - Go to "AI" → "Advanced"
+   - Enable "Use a custom MCP server"
+   - Set the MCP Server Command to the full path of the integration script:
+     ```
+     /path/to/your/mcp-server/run_cursor_integration.sh
+     ```
+   - Save settings and restart Cursor
+
+4. Troubleshooting:
+   - If you see "No tools valiables" errors, check the server logs (which appear on stderr)
+   - Verify that the server is sending properly formatted JSON-RPC messages with a "tools" array
+   - Try using stdio mode for direct Cursor integration
+
+## Troubleshooting "No Available Tools" Error
+
+If you encounter the "No available tools" error in Cursor when using this MCP Server, follow these steps:
+
+1. **Verify the Format of Tool Definitions**:
+   
+   The Model Context Protocol requires tools to be defined in a specific format. The key change is using `parameters` instead of `schema`:
+
+   ```json
+   {
+     "jsonrpc": "2.0",
+     "method": "tools_available",
+     "params": {
+       "tools": [
+         {
+           "name": "execute_query",
+           "description": "Execute a SQL query",
+           "parameters": {
+             "type": "object",
+             "properties": {
+               "sql": {
+                 "type": "string",
+                 "description": "SQL query to execute"
+               }
+             },
+             "required": ["sql"]
+           }
+         }
+       ]
+     }
+   }
+   ```
+
+2. **Run in Debug Mode**:
+   
+   Use the debug flag to capture detailed logs:
+   ```bash
+   ./run_cursor_integration.sh --debug
+   ```
+   
+   Then check the `mcp-debug.log` file for errors or format issues.
+
+3. **Test with the Mock Server**:
+   
+   We've included a mock server that sends correctly formatted tools:
+   ```bash
+   ./mock_cursor.sh
+   ```
+   
+   Configure Cursor to use this script instead to verify if Cursor can recognize tools in this format.
+
+4. **Verify JSON-RPC Format**:
+   
+   Ensure all messages follow the JSON-RPC 2.0 specification:
+   - Include `jsonrpc: "2.0"` in all messages
+   - Use the correct method names: `tools_available` and `execute_tool`
+   - Format parameters correctly with the right field names
+
+5. **Check Transport Mode**:
+   
+   Ensure you're using `stdio` transport mode when integrating with Cursor:
+   - Set `TRANSPORT_MODE=stdio` in `.env`
+   - Or use the `--transport=stdio` flag
+
+If the issue persists, try comparing the output of your server with the mock server to identify any differences in format.
+
+## Solution to "No Available Tools" Error
+
+After extensive testing and debugging, we've identified and fixed the issues causing the "No Available Tools" error in Cursor. The key changes include:
+
+1. **Tool Definition Format**: Changed from using `Parameters` to using `Arguments` in the tool definitions. This aligns with the TypeScript SDK reference.
+
+2. **JSON-RPC Message Structure**: 
+   - Ensured the ID field is a string, not a number
+   - Used "name" instead of "tool" in the execute_tool request parameters
+   - Properly structured the arguments field
+
+3. **Example of a correct tool definition**:
+   ```json
+   {
+     "name": "execute_query",
+     "description": "Execute a SQL query and return the results",
+     "arguments": [
+       {
+         "name": "sql",
+         "description": "SQL query to execute",
+         "required": true,
+         "schema": {
+           "type": "string"
+         }
+       }
+     ]
+   }
+   ```
+
+4. **Example of a correct tool execution request**:
+   ```json
+   {
+     "jsonrpc": "2.0",
+     "method": "execute_tool",
+     "params": {
+       "name": "execute_query",
+       "arguments": {
+         "sql": "SELECT 1"
+       }
+     },
+     "id": "1"
+   }
+   ```
+
+5. **Testing Tools**: We've created several tools to help test and debug:
+   - `simple_mock.sh`: A minimal script that outputs correctly formatted JSON
+   - `test_client`: A Go client that can test the MCP server
+   - Debug logging in the server to trace JSON format issues
+
+To test your MCP server with Cursor, follow these steps:
+1. Ensure your tool definitions use the `arguments` format shown above
+2. Make sure your execute_tool handler expects the tool name in the `name` field
+3. Use string IDs in your JSON-RPC messages
+4. Run the server with `./run_cursor_integration.sh --debug` to see detailed logs
+5. If issues persist, try the test client: `./test_client`
+
+## Cursor MCP Integration
+
+### Making Tools Appear in Cursor Editor
+
+To ensure your tools appear in the Cursor Editor MCP Server configuration, the server must follow the JSON-RPC 2.0 protocol and use the correct message format expected by Cursor:
+
+1. The `tools/list` method must be used (not `tools_available` from older protocols)
+2. Tool definitions must include the `inputSchema` field in the JSON Schema format
+3. The response must be properly formatted as a JSON-RPC 2.0 message
+
+### Example Tool Definition
+
+```json
+{
+  "name": "execute_query",
+  "description": "Execute a SQL query and return the results",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "sql": {
+        "type": "string",
+        "description": "SQL query to execute"
+      }
+    },
+    "required": ["sql"]
+  }
+}
+```
+
+### Testing Tool Definitions
+
+You can use the provided test script to verify that your tool definitions are correctly formatted:
+
+```bash
+# Output a sample tools/list message in the format expected by Cursor
+./simple_cursor_mock.sh
+```
+
+### Troubleshooting
+
+If your tools don't appear in Cursor, check the following:
+
+1. **Message Format**: Ensure the server is sending a valid JSON-RPC 2.0 message with the `tools/list` method
+2. **Tool Definition Format**: Each tool must have a `name`, `description`, and `inputSchema` property
+3. **Transport**: Make sure you're using the correct transport mode (stdio or SSE) in your Cursor configuration
+4. **Debug Logs**: Enable debug logs in your server to see the exact messages being sent
+5. **Method Names**: Verify that you're using `tools/list` for listing tools and `tools/call` for executing tools
+
+Example debug command:
+
+```bash
+# Run the server with debug logs enabled
+DEBUG=true ./server
+```
+
+### Common Issues
+
+- **Tools not appearing**: Check that your server is correctly implementing the `tools/list` method and sending valid tool definitions
+- **Tools appearing but not working**: Ensure that your tool execution endpoint correctly handles the `tools/call` method and parameter format
+- **Wrong tool format**: Make sure each tool has an `inputSchema` property that follows the JSON Schema format
+
+For more details on the MCP protocol, refer to the [Cursor MCP Protocol Documentation](https://docs.cursor.sh/mcp-protocol).
+
+## Integrating with Cursor Editor
+
+The MCP server can be integrated with Cursor Editor to provide custom tools. Follow these steps to set up the integration:
+
+1. Start the MCP server:
+   ```bash
+   make run
+   ```
+
+2. In Cursor Editor, go to Settings > Extensions > MCP.
+
+3. Add a new MCP server with the following URL:
+   ```
+   http://localhost:8080/cursor-mcp
+   ```
+
+4. Save the settings and restart Cursor Editor.
+
+5. You should now see the tools provided by the MCP server in the Cursor Editor.
+
+### Testing the Integration
+
+You can test the integration using the provided test script:
+
+```bash
+./test_cursor_integration.sh
+```
+
+This script will:
+1. Test getting the tools list from the server
+2. Test executing a tool
+3. Verify that the responses are correctly formatted
+
+### Troubleshooting
+
+If you see "No available tools" in Cursor Editor:
+
+1. Make sure the MCP server is running
+2. Check that the URL in Cursor settings is correct
+3. Look at the server logs for any errors
+4. Try restarting Cursor Editor
+5. Verify that the server is responding correctly using the test script

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mcpserver/internal/domain/entities"
 	"mcpserver/internal/domain/repositories"
+	"os"
 )
 
 // CursorMCPUseCase handles Cursor MCP protocol operations
@@ -30,46 +31,65 @@ func (uc *CursorMCPUseCase) GetToolsEvent(ctx context.Context) (*entities.MCPToo
 	// Create a tools event following JSON-RPC 2.0 format
 	event := &entities.MCPToolsEvent{
 		JsonRPC: entities.JSONRPCVersion,
-		Method:  entities.MethodToolsAvailable,
-		Params: entities.MCPToolsEventParams{
-			Tools: tools,
-		},
+		ID:      "tools-list", // Add an ID for the response
+		Method:  entities.MethodToolsList,
 	}
+
+	// Set the tools in the Result field
+	event.Result.Tools = tools
+
+	// Debug: Print the exact JSON that will be sent
+	jsonBytes, _ := json.MarshalIndent(event, "", "  ")
+	fmt.Fprintf(os.Stderr, "DEBUG - Tools event JSON to be sent:\n%s\n", string(jsonBytes))
 
 	return event, nil
 }
 
 // ExecuteTool executes a tool and returns a response
 func (uc *CursorMCPUseCase) ExecuteTool(ctx context.Context, toolRequest *entities.MCPToolRequest) (*entities.MCPToolResponse, error) {
-	// Extract tool name from parameters
-	toolName, ok := toolRequest.Parameters["name"].(string)
-	if !ok {
-		return createErrorResponse(toolRequest.ID, entities.ErrorCodeInvalidParams, "Missing or invalid tool name"), nil
+	// Special handling for tools/list method
+	if toolRequest.Method == entities.MethodToolsList {
+		tools, err := uc.toolRepo.GetAllTools(ctx)
+		if err != nil {
+			return createErrorResponse(
+				toolRequest.ID,
+				entities.ErrorCodeInternalError,
+				fmt.Sprintf("Failed to get tools list: %v", err),
+			), nil
+		}
+
+		// Return successful response with tools list
+		return &entities.MCPToolResponse{
+			JsonRPC: entities.JSONRPCVersion,
+			ID:      toolRequest.ID,
+			Result: map[string]interface{}{
+				"tools": tools,
+			},
+		}, nil
 	}
 
-	// Create a tool request for the repository
-	repoRequest := entities.MCPToolRequest{
-		ID:         toolRequest.ID,
-		Method:     entities.MethodExecuteTool,
-		Parameters: toolRequest.Parameters,
+	// For tool execution requests
+	if toolRequest.Method == entities.MethodToolsCall {
+		// Execute the tool
+		response, err := uc.toolRepo.ExecuteTool(ctx, *toolRequest)
+		if err != nil {
+			// Return a properly formatted error response
+			return createErrorResponse(
+				toolRequest.ID,
+				entities.ErrorCodeToolExecutionFailed,
+				fmt.Sprintf("Failed to execute tool: %v", err),
+			), nil
+		}
+
+		return response, nil
 	}
 
-	response, err := uc.toolRepo.ExecuteTool(ctx, repoRequest)
-	if err != nil {
-		// Return a properly formatted error response
-		return createErrorResponse(
-			toolRequest.ID,
-			entities.ErrorCodeToolExecutionFailed,
-			fmt.Sprintf("Failed to execute tool '%s': %v", toolName, err),
-		), nil
-	}
-
-	// Return successful response
-	return &entities.MCPToolResponse{
-		JsonRPC: entities.JSONRPCVersion,
-		ID:      toolRequest.ID,
-		Result:  response.Result,
-	}, nil
+	// Unknown method
+	return createErrorResponse(
+		toolRequest.ID,
+		entities.ErrorCodeMethodNotFound,
+		fmt.Sprintf("Unknown method: %s", toolRequest.Method),
+	), nil
 }
 
 // Helper function to create error responses

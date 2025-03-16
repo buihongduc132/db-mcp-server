@@ -36,13 +36,11 @@ func (u *TransportUseCase) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to get tools: %w", err)
 	}
 
-	// Convert to JSON and send tools event
-	toolsJSON, err := json.Marshal(toolsEvent)
-	if err != nil {
-		return fmt.Errorf("failed to marshal tools event: %w", err)
-	}
+	// Log the tools event for debugging
+	log.Printf("Sending tools event with %d tools", len(toolsEvent.Result.Tools))
 
-	if err := u.transport.SendRaw(string(toolsJSON)); err != nil {
+	// Send the tools event directly without additional marshaling
+	if err := u.transport.Send(toolsEvent); err != nil {
 		return fmt.Errorf("failed to send tools event: %w", err)
 	}
 

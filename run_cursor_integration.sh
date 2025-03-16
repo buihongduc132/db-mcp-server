@@ -1,15 +1,33 @@
 #!/bin/bash
 
-# Set environment variables for stdio mode
+# Set environment for building
+export GO111MODULE=on
+
+# Check for debug mode
+if [ "$1" = "--debug" ]; then
+  DEBUG=true
+  echo "Running in DEBUG mode - detailed logs will be saved to mcp-debug.log" >&2
+else
+  DEBUG=false
+fi
+
+# Build the server
+echo "Building MCP Server..." >&2
+go build -o server ./cmd/server
+
+# Set the TRANSPORT_MODE environment variable
 export TRANSPORT_MODE=stdio
 
-echo "Starting MCP server in stdio mode for Cursor integration..." >&2
-echo "Any debug output will appear on stderr, while JSON protocol messages go to stdout" >&2
+# Run the server with stdio mode explicitly set
+echo "Starting MCP Server in stdio mode for Cursor integration..." >&2
 
-# Ensure the directory is correct
-cd "$(dirname "$0")"
+if [ "$DEBUG" = "true" ]; then
+  # Run with debug output captured to a file
+  ./server --transport=stdio 2> mcp-debug.log
+else
+  # Normal run
+  ./server --transport=stdio
+fi
 
-# Run the server in stdio mode
-# Using exec to replace the shell process with the server
-# This ensures proper signal handling
-exec go run cmd/server/main.go -transport stdio
+# Note: For debugging, you can use the following instead:
+# ./server --transport=sse --port=9090
