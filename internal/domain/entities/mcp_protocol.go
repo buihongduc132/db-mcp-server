@@ -38,10 +38,10 @@ type MCPToolRequest struct {
 
 // MCPToolResponse defines a response to a tool execution request
 type MCPToolResponse struct {
-	JsonRPC string      `json:"jsonrpc"` // Must be "2.0"
-	ID      string      `json:"id"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   *MCPError   `json:"error,omitempty"`
+	JsonRPC string                 `json:"jsonrpc"` // Must be "2.0"
+	ID      string                 `json:"id"`
+	Result  map[string]interface{} `json:"result,omitempty"` // Should be a map with content or other data
+	Error   *MCPError              `json:"error,omitempty"`
 }
 
 // MCPError defines the error structure for JSON-RPC 2.0
@@ -52,13 +52,16 @@ type MCPError struct {
 }
 
 // MCPToolsEvent is sent to inform Cursor about available tools
+// Note on JSON-RPC 2.0 format:
+// - For notifications (no response expected): use Method and Params fields (no ID)
+// - For responses to requests: use ID and Result fields (no Method)
+// Never mix Method+Result in the same message as it violates the JSON-RPC 2.0 spec
 type MCPToolsEvent struct {
-	JsonRPC string `json:"jsonrpc"` // Must be "2.0"
-	ID      string `json:"id,omitempty"`
-	Method  string `json:"method"` // Should be "tools/list"
-	Result  struct {
-		Tools []MCPToolDefinition `json:"tools"`
-	} `json:"result"` // For successful response
+	JsonRPC string                 `json:"jsonrpc"`          // Must be "2.0"
+	ID      string                 `json:"id,omitempty"`     // Only for responses
+	Method  string                 `json:"method,omitempty"` // Only for notifications/requests
+	Params  map[string]interface{} `json:"params,omitempty"` // Used with Method for notifications
+	Result  map[string]interface{} `json:"result,omitempty"` // Used with ID for responses
 }
 
 // MCPListToolsRequest defines a request from Cursor to list tools

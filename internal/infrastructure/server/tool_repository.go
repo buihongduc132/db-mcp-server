@@ -156,7 +156,7 @@ func (r *DatabaseToolRepository) executeQuery(ctx context.Context, id string, ar
 	return &entities.MCPToolResponse{
 		JsonRPC: entities.JSONRPCVersion,
 		ID:      id,
-		Result:  results,
+		Result:  map[string]interface{}{"content": results},
 	}, nil
 }
 
@@ -169,12 +169,13 @@ func (r *DatabaseToolRepository) insertData(ctx context.Context, id string, args
 	}
 
 	// Extract data parameter
-	dataParam, ok := args["data"].(map[string]interface{})
+	data, ok := args["data"].(map[string]interface{})
 	if !ok {
 		return createJsonRpcErrorResponse(id, entities.ErrorCodeInvalidParams, "Parameter 'data' must be an object"), nil
 	}
 
-	insertedID, err := r.dbRepo.InsertData(ctx, table, dataParam)
+	// Insert data
+	rowsAffected, err := r.dbRepo.InsertData(ctx, table, data)
 	if err != nil {
 		return createJsonRpcErrorResponse(id, entities.ErrorCodeToolExecutionFailed, fmt.Sprintf("Insert error: %v", err)), nil
 	}
@@ -182,7 +183,7 @@ func (r *DatabaseToolRepository) insertData(ctx context.Context, id string, args
 	return &entities.MCPToolResponse{
 		JsonRPC: entities.JSONRPCVersion,
 		ID:      id,
-		Result:  map[string]int64{"inserted_id": insertedID},
+		Result:  map[string]interface{}{"content": map[string]interface{}{"rowsAffected": rowsAffected}},
 	}, nil
 }
 
@@ -195,7 +196,7 @@ func (r *DatabaseToolRepository) updateData(ctx context.Context, id string, args
 	}
 
 	// Extract data parameter
-	dataParam, ok := args["data"].(map[string]interface{})
+	data, ok := args["data"].(map[string]interface{})
 	if !ok {
 		return createJsonRpcErrorResponse(id, entities.ErrorCodeInvalidParams, "Parameter 'data' must be an object"), nil
 	}
@@ -206,7 +207,8 @@ func (r *DatabaseToolRepository) updateData(ctx context.Context, id string, args
 		return createJsonRpcErrorResponse(id, entities.ErrorCodeInvalidParams, "Parameter 'condition' must be a string"), nil
 	}
 
-	affected, err := r.dbRepo.UpdateData(ctx, table, dataParam, condition)
+	// Update data
+	rowsAffected, err := r.dbRepo.UpdateData(ctx, table, data, condition)
 	if err != nil {
 		return createJsonRpcErrorResponse(id, entities.ErrorCodeToolExecutionFailed, fmt.Sprintf("Update error: %v", err)), nil
 	}
@@ -214,7 +216,7 @@ func (r *DatabaseToolRepository) updateData(ctx context.Context, id string, args
 	return &entities.MCPToolResponse{
 		JsonRPC: entities.JSONRPCVersion,
 		ID:      id,
-		Result:  map[string]int64{"rows_affected": affected},
+		Result:  map[string]interface{}{"content": map[string]interface{}{"rowsAffected": rowsAffected}},
 	}, nil
 }
 
@@ -232,7 +234,8 @@ func (r *DatabaseToolRepository) deleteData(ctx context.Context, id string, args
 		return createJsonRpcErrorResponse(id, entities.ErrorCodeInvalidParams, "Parameter 'condition' must be a string"), nil
 	}
 
-	affected, err := r.dbRepo.DeleteData(ctx, table, condition)
+	// Delete data
+	rowsAffected, err := r.dbRepo.DeleteData(ctx, table, condition)
 	if err != nil {
 		return createJsonRpcErrorResponse(id, entities.ErrorCodeToolExecutionFailed, fmt.Sprintf("Delete error: %v", err)), nil
 	}
@@ -240,6 +243,6 @@ func (r *DatabaseToolRepository) deleteData(ctx context.Context, id string, args
 	return &entities.MCPToolResponse{
 		JsonRPC: entities.JSONRPCVersion,
 		ID:      id,
-		Result:  map[string]int64{"rows_affected": affected},
+		Result:  map[string]interface{}{"content": map[string]interface{}{"rowsAffected": rowsAffected}},
 	}, nil
 }

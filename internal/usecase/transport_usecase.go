@@ -37,7 +37,7 @@ func (u *TransportUseCase) Start(ctx context.Context) error {
 	}
 
 	// Log the tools event for debugging
-	log.Printf("Sending tools event with %d tools", len(toolsEvent.Result.Tools))
+	log.Printf("Sending tools event with result: %v", toolsEvent.Result)
 
 	// Convert to JSON for more reliable transmission
 	toolsJSON, err := json.Marshal(toolsEvent)

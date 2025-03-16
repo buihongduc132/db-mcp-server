@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"mcpserver/internal/domain/entities"
 	"mcpserver/internal/domain/repositories"
-	"os"
 )
 
 // CursorMCPUseCase handles Cursor MCP protocol operations
@@ -29,18 +29,17 @@ func (uc *CursorMCPUseCase) GetToolsEvent(ctx context.Context) (*entities.MCPToo
 	}
 
 	// Create a tools event following JSON-RPC 2.0 format
+	// When using 'method', we should use 'params' not 'result' for notifications
 	event := &entities.MCPToolsEvent{
 		JsonRPC: entities.JSONRPCVersion,
-		ID:      "tools-list", // Add an ID for the response
 		Method:  entities.MethodToolsList,
+		Params:  map[string]interface{}{"tools": tools},
+		// No ID for notifications
 	}
-
-	// Set the tools in the Result field
-	event.Result.Tools = tools
 
 	// Debug: Print the exact JSON that will be sent
 	jsonBytes, _ := json.MarshalIndent(event, "", "  ")
-	fmt.Fprintf(os.Stderr, "DEBUG - Tools event JSON to be sent:\n%s\n", string(jsonBytes))
+	log.Printf("Sending tools event: %s", string(jsonBytes))
 
 	return event, nil
 }
@@ -59,12 +58,11 @@ func (uc *CursorMCPUseCase) ExecuteTool(ctx context.Context, toolRequest *entiti
 		}
 
 		// Return successful response with tools list
+		// For responses, we include id and result (no method)
 		return &entities.MCPToolResponse{
 			JsonRPC: entities.JSONRPCVersion,
 			ID:      toolRequest.ID,
-			Result: map[string]interface{}{
-				"tools": tools,
-			},
+			Result:  map[string]interface{}{"tools": tools},
 		}, nil
 	}
 
@@ -73,22 +71,36 @@ func (uc *CursorMCPUseCase) ExecuteTool(ctx context.Context, toolRequest *entiti
 		// Execute the tool
 		response, err := uc.toolRepo.ExecuteTool(ctx, *toolRequest)
 		if err != nil {
-			// Return a properly formatted error response
+			// Return error response
 			return createErrorResponse(
 				toolRequest.ID,
 				entities.ErrorCodeToolExecutionFailed,
-				fmt.Sprintf("Failed to execute tool: %v", err),
+				fmt.Sprintf("Tool execution failed: %v", err),
 			), nil
+		}
+
+		// If response is nil, create a default success response
+		if response == nil {
+			return &entities.MCPToolResponse{
+				JsonRPC: entities.JSONRPCVersion,
+				ID:      toolRequest.ID,
+				Result:  map[string]interface{}{},
+			}, nil
+		}
+
+		// Ensure result is properly formatted for JSON-RPC 2.0
+		if response.ID == "" {
+			response.ID = toolRequest.ID
 		}
 
 		return response, nil
 	}
 
-	// Unknown method
+	// For unsupported methods
 	return createErrorResponse(
 		toolRequest.ID,
 		entities.ErrorCodeMethodNotFound,
-		fmt.Sprintf("Unknown method: %s", toolRequest.Method),
+		fmt.Sprintf("Unsupported method: %s", toolRequest.Method),
 	), nil
 }
 

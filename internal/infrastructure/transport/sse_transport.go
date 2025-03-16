@@ -258,7 +258,7 @@ func (t *SSETransport) writeEvent(event interface{}) error {
 	// Special handling for tools event to ensure correct format
 	if toolsEvent, ok := event.(*entities.MCPToolsEvent); ok {
 		// Log for debugging
-		fmt.Fprintf(os.Stderr, "Processing SSE tools event with %d tools\n", len(toolsEvent.Result.Tools))
+		fmt.Fprintf(os.Stderr, "Processing SSE tools event with result: %v\n", toolsEvent.Result)
 
 		// Ensure the event is properly formatted for Cursor
 		jsonBytes, err = json.Marshal(toolsEvent)
