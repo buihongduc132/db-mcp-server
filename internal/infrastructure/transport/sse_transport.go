@@ -8,6 +8,7 @@ import (
 	"mcpserver/internal/domain/entities"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -144,22 +145,59 @@ func (t *SSETransport) Receive() (<-chan interface{}, <-chan error) {
 
 // handleEvents writes events to the response
 func (t *SSETransport) handleEvents(ctx context.Context) {
+	// Recover from any panics
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in handleEvents: %v", r)
+		}
+	}()
+
 	for {
 		select {
 		case event, ok := <-t.eventChan:
 			if !ok {
 				// Channel closed
+				log.Println("Event channel closed, stopping events handler")
 				return
 			}
+
+			// Handle the event and log any errors
 			if err := t.writeEvent(event); err != nil {
 				log.Printf("Error writing event: %v", err)
-				t.errorChan <- err
+				// Send the error to the error channel but don't panic
+				select {
+				case t.errorChan <- err:
+					// Error sent successfully
+				default:
+					// Error channel full or closed, just log
+					log.Printf("Could not send error to channel: %v", err)
+				}
+
+				// Check if we should stop due to a connection error
+				if isConnectionError(err) {
+					log.Printf("Connection error detected, stopping events handler: %v", err)
+					return
+				}
 			}
 		case <-ctx.Done():
 			log.Println("Context done, stopping SSE events handler")
 			return
 		}
 	}
+}
+
+// isConnectionError checks if an error is related to a connection issue
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	return strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "connection closed") ||
+		strings.Contains(errStr, "response writer is nil") ||
+		strings.Contains(errStr, "transport not started")
 }
 
 // handleToolRequests handles tool requests coming from the client
@@ -238,14 +276,50 @@ func (t *SSETransport) writeEvent(event interface{}) error {
 		}
 	}
 
+	// Lock to protect responseWriter access
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Check if responseWriter is nil before writing
+	if t.responseWriter == nil {
+		return fmt.Errorf("response writer is nil, connection may have been closed")
+	}
+
+	// Check if the transport is still started
+	if !t.started {
+		return fmt.Errorf("transport not started or already stopped")
+	}
+
 	// Write the event to the response in SSE format
 	if _, err := fmt.Fprintf(t.responseWriter, "data: %s\n\n", string(jsonBytes)); err != nil {
 		return fmt.Errorf("error writing SSE event: %w", err)
 	}
 
-	// Flush the response
-	if flusher, ok := t.responseWriter.(http.Flusher); ok {
-		flusher.Flush()
+	// Safely flush the response
+	// Wrap the flusher check in a recover to handle any panics
+	var flushErr error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Recovered from panic in writeEvent flush: %v", r)
+				flushErr = fmt.Errorf("panic during flush: %v", r)
+			}
+		}()
+
+		// Try to flush, but don't panic if it fails
+		if flusher, ok := t.responseWriter.(http.Flusher); ok {
+			if flusher != nil {
+				flusher.Flush()
+			} else {
+				flushErr = fmt.Errorf("flusher is nil")
+			}
+		} else {
+			log.Printf("ResponseWriter does not support http.Flusher interface")
+		}
+	}()
+
+	if flushErr != nil {
+		return flushErr
 	}
 
 	return nil

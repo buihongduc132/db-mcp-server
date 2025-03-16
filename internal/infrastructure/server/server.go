@@ -63,6 +63,58 @@ func NewServer(cfg Config, dbRepo repositories.DBRepository) (*MCPServer, error)
 	// Cursor MCP protocol endpoint
 	mux.Handle("/cursor-mcp", cursorHandler)
 
+	// Add the /sse endpoint for Cursor SSE connections
+	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Received SSE connection request from: %s %s", r.RemoteAddr, r.URL.Path)
+
+		// Set required SSE headers early to ensure they're sent
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*") // Allow cross-origin requests
+
+		// Send an initial comment to establish the connection
+		fmt.Fprint(w, ": SSE connection established\n\n")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		} else {
+			log.Printf("Warning: ResponseWriter does not support Flusher interface")
+		}
+
+		// Create transport factory
+		transportFactory := transport.NewFactory()
+
+		// Create SSE transport
+		sseTransport, err := transportFactory.CreateTransport(config.SSETransport, w, r)
+		if err != nil {
+			log.Printf("Failed to create SSE transport: %v", err)
+			http.Error(w, "Failed to create SSE transport", http.StatusInternalServerError)
+			return
+		}
+
+		// Create transport use case
+		transportUseCase := usecase.NewTransportUseCase(sseTransport, cursorMCPUseCase)
+
+		// Start the transport
+		ctx := r.Context()
+		if err := transportUseCase.Start(ctx); err != nil {
+			log.Printf("Failed to start SSE transport: %v", err)
+			http.Error(w, "Failed to start SSE transport", http.StatusInternalServerError)
+			return
+		}
+
+		// Wait for context to be done (client disconnects or server shuts down)
+		<-ctx.Done()
+		log.Printf("SSE connection closed for client: %s", r.RemoteAddr)
+		transportUseCase.Stop(context.Background())
+	})
+
+	// Also add the same endpoint at /ss3 to handle mistyped URLs
+	mux.HandleFunc("/ss3", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Redirecting /ss3 request to /sse from client: %s", r.RemoteAddr)
+		http.Redirect(w, r, "/sse", http.StatusTemporaryRedirect)
+	})
+
 	// Add debug endpoint to check server status
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
