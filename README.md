@@ -216,7 +216,7 @@ In Cursor, configure the MCP server in `.cursor/mcp.json`:
 {
   "mcpServers": {
     "db-server": {
-      "command": "/path/to/mcp-server",
+      "command": "/path/to/mcp-server/server",
       "args": ["-transport", "stdio"],
       "env": {
         "DB_TYPE": "mysql",

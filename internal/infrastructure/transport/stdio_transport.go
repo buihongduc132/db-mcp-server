@@ -45,6 +45,11 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 		return fmt.Errorf("transport already started")
 	}
 
+	log.Println("Starting stdio transport...")
+
+	// Immediately send a diagnostic message to stderr (won't interfere with protocol)
+	fmt.Fprintln(os.Stderr, "Stdio transport started and waiting for input...")
+
 	// Start goroutine to handle outgoing events (writing to stdout)
 	go t.handleEvents(ctx)
 
@@ -52,7 +57,6 @@ func (t *StdioTransport) Start(ctx context.Context) error {
 	go t.handleRequests(ctx)
 
 	t.started = true
-	log.Println("Started stdio transport")
 	return nil
 }
 
@@ -64,6 +68,8 @@ func (t *StdioTransport) Stop(ctx context.Context) error {
 	if !t.started {
 		return nil
 	}
+
+	log.Println("Stopping stdio transport...")
 
 	close(t.eventChan)
 	close(t.requestChan)
@@ -95,12 +101,19 @@ func (t *StdioTransport) Receive() (<-chan *entities.MCPToolRequest, <-chan erro
 func (t *StdioTransport) handleEvents(ctx context.Context) {
 	for {
 		select {
-		case event := <-t.eventChan:
+		case event, ok := <-t.eventChan:
+			if !ok {
+				// Channel closed
+				return
+			}
 			if err := t.writeEvent(event); err != nil {
+				// Log to stderr so it doesn't interfere with protocol
+				fmt.Fprintf(os.Stderr, "Error writing event: %v\n", err)
 				t.errorChan <- err
 			}
 		case <-ctx.Done():
-			log.Println("Context done, stopping stdio transport")
+			// Log to stderr so it doesn't interfere with protocol
+			fmt.Fprintln(os.Stderr, "Context done, stopping stdio events handler")
 			return
 		}
 	}
@@ -108,12 +121,14 @@ func (t *StdioTransport) handleEvents(ctx context.Context) {
 
 // handleRequests reads requests from stdin
 func (t *StdioTransport) handleRequests(ctx context.Context) {
-	log.Println("Started reading requests from stdin")
+	// Log to stderr so it doesn't interfere with protocol
+	fmt.Fprintln(os.Stderr, "Started reading requests from stdin...")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Context done, stopping request handler")
+			// Log to stderr so it doesn't interfere with protocol
+			fmt.Fprintln(os.Stderr, "Context done, stopping request handler")
 			return
 		default:
 			// Read a line from stdin
@@ -121,10 +136,12 @@ func (t *StdioTransport) handleRequests(ctx context.Context) {
 			if err != nil {
 				if err == io.EOF {
 					// EOF means stdin was closed, which is a normal shutdown
-					log.Println("EOF received, closing request handler")
+					// Log to stderr so it doesn't interfere with protocol
+					fmt.Fprintln(os.Stderr, "EOF received, closing request handler")
 					return
 				}
-				log.Printf("Error reading from stdin: %v", err)
+				// Log to stderr so it doesn't interfere with protocol
+				fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
 				t.errorChan <- fmt.Errorf("error reading from stdin: %w", err)
 				continue
 			}
@@ -137,17 +154,20 @@ func (t *StdioTransport) handleRequests(ctx context.Context) {
 				continue
 			}
 
-			log.Printf("Received request: %s", line)
+			// Log to stderr so it doesn't interfere with protocol
+			fmt.Fprintf(os.Stderr, "Received request: %s\n", line)
 
 			// Parse the request
 			var toolRequest entities.MCPToolRequest
 			if err := json.Unmarshal([]byte(line), &toolRequest); err != nil {
-				log.Printf("Error parsing request: %v, input: %s", err, line)
+				// Log to stderr so it doesn't interfere with protocol
+				fmt.Fprintf(os.Stderr, "Error parsing request: %v, input: %s\n", err, line)
 				t.errorChan <- fmt.Errorf("error parsing request: %w", err)
 				continue
 			}
 
-			log.Printf("Parsed tool request: %s", toolRequest.Name)
+			// Log to stderr so it doesn't interfere with protocol
+			fmt.Fprintf(os.Stderr, "Parsed tool request: %s\n", toolRequest.Name)
 
 			// Send the request to the channel
 			t.requestChan <- &toolRequest
@@ -164,12 +184,13 @@ func (t *StdioTransport) writeEvent(event *entities.MCPEvent) error {
 
 	// Write the event to stdout without any extra formatting
 	// This ensures Cursor can parse it correctly
-	_, err = fmt.Fprint(t.writer, string(eventJSON))
+	_, err = fmt.Fprintln(t.writer, string(eventJSON))
 	if err != nil {
 		return err
 	}
 
-	// Add a newline after the JSON to flush the output
-	_, err = fmt.Fprintln(t.writer)
-	return err
+	// Log to stderr for debugging (won't interfere with protocol)
+	fmt.Fprintf(os.Stderr, "Sent event: %s\n", string(eventJSON))
+
+	return nil
 }

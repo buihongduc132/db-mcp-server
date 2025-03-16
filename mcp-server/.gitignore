@@ -1,1 +1,0 @@
-# Binaries for programs and plugins\n*.exe\n*.exe~\n*.dll\n*.so\n*.dylib\nmcp-server\n\n# Test binary, built with \`go test -c\`\n*.test\n\n# Output of the go coverage tool\n*.out\n\n# Environment variables\n.env\n\n# IDE specific files\n.idea/\n.vscode/

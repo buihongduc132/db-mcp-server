@@ -42,18 +42,36 @@ func (t *SSETransport) Start(ctx context.Context) error {
 		return fmt.Errorf("transport already started")
 	}
 
+	// Validate we have the response writer and request
+	if t.responseWriter == nil || t.request == nil {
+		return fmt.Errorf("SSE transport requires response writer and request")
+	}
+
+	log.Printf("Starting SSE transport for client: %s", t.request.RemoteAddr)
+
 	// Set SSE headers
 	t.responseWriter.Header().Set("Content-Type", "text/event-stream")
 	t.responseWriter.Header().Set("Cache-Control", "no-cache")
 	t.responseWriter.Header().Set("Connection", "keep-alive")
 	t.responseWriter.Header().Set("Access-Control-Allow-Origin", "*") // Allow cross-origin requests
 
+	// Send an initial comment to establish the connection
+	fmt.Fprint(t.responseWriter, ": SSE connection established\n\n")
+	if flusher, ok := t.responseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	} else {
+		return fmt.Errorf("response writer does not support flushing")
+	}
+
 	// Start goroutine to handle incoming events
 	go t.handleEvents(ctx)
 
 	// Start goroutine to handle POST requests as tool requests
-	if t.request.Method == http.MethodPost {
+	// Only handle POST requests with a request body
+	if t.request.Method == http.MethodPost && t.request.ContentLength > 0 {
 		go t.handleToolRequests()
+	} else {
+		log.Printf("Request is not a POST or has no body: %s %s", t.request.Method, t.request.URL.Path)
 	}
 
 	t.started = true
@@ -68,6 +86,8 @@ func (t *SSETransport) Stop(ctx context.Context) error {
 	if !t.started {
 		return nil
 	}
+
+	log.Printf("Stopping SSE transport for client: %s", t.request.RemoteAddr)
 
 	close(t.eventChan)
 	close(t.requestChan)
@@ -99,16 +119,22 @@ func (t *SSETransport) Receive() (<-chan *entities.MCPToolRequest, <-chan error)
 func (t *SSETransport) handleEvents(ctx context.Context) {
 	for {
 		select {
-		case event := <-t.eventChan:
-			if err := t.writeEvent(event); err != nil {
-				t.errorChan <- err
+		case event, ok := <-t.eventChan:
+			if !ok {
+				// Channel closed
+				log.Println("Event channel closed, stopping SSE event handler")
 				return
 			}
+			if err := t.writeEvent(event); err != nil {
+				log.Printf("Error writing SSE event: %v", err)
+				t.errorChan <- err
+				return // Stop on write error
+			}
 		case <-ctx.Done():
-			log.Println("Context done, stopping SSE transport")
+			log.Println("Context done, stopping SSE event handler")
 			return
 		case <-t.request.Context().Done():
-			log.Println("Client disconnected")
+			log.Println("Client disconnected, stopping SSE event handler")
 			return
 		}
 	}
@@ -116,15 +142,25 @@ func (t *SSETransport) handleEvents(ctx context.Context) {
 
 // handleToolRequests handles tool requests from the client
 func (t *SSETransport) handleToolRequests() {
+	if t.request.Body == nil {
+		log.Println("Request body is nil, cannot handle tool requests")
+		t.errorChan <- fmt.Errorf("request body is nil")
+		return
+	}
+
+	log.Printf("Processing tool request from %s", t.request.RemoteAddr)
+
 	decoder := json.NewDecoder(t.request.Body)
 	defer t.request.Body.Close()
 
 	var toolRequest entities.MCPToolRequest
 	if err := decoder.Decode(&toolRequest); err != nil {
+		log.Printf("Error decoding tool request: %v", err)
 		t.errorChan <- fmt.Errorf("error decoding tool request: %w", err)
 		return
 	}
 
+	log.Printf("Received tool request: %s (ID: %s)", toolRequest.Name, toolRequest.ID)
 	t.requestChan <- &toolRequest
 }
 
@@ -135,10 +171,18 @@ func (t *SSETransport) writeEvent(event *entities.MCPEvent) error {
 		return fmt.Errorf("error marshaling event: %w", err)
 	}
 
-	// Write the event to the response
-	fmt.Fprintf(t.responseWriter, "data: %s\n\n", string(eventJSON))
+	// Write the event to the response in SSE format
+	_, err = fmt.Fprintf(t.responseWriter, "data: %s\n\n", string(eventJSON))
+	if err != nil {
+		return fmt.Errorf("error writing to response: %w", err)
+	}
+
+	// Flush the response to ensure the event is sent immediately
 	if flusher, ok := t.responseWriter.(http.Flusher); ok {
 		flusher.Flush()
+		log.Printf("Sent SSE event: %s", string(eventJSON))
+	} else {
+		return fmt.Errorf("response writer does not support flushing")
 	}
 
 	return nil

@@ -11,6 +11,7 @@ import (
 	"mcpserver/internal/interfaces/api"
 	"mcpserver/internal/usecase"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -121,7 +122,7 @@ func (s *MCPServer) Start() error {
 
 	// If using stdio transport, start it in a separate goroutine
 	if s.transportMode == config.StdioTransport {
-		log.Println("Starting stdio transport...")
+		log.Println("Starting in stdio transport mode...")
 
 		// Create stdio transport
 		transportFactory := transport.NewFactory()
@@ -139,16 +140,30 @@ func (s *MCPServer) Start() error {
 			ctx := context.Background()
 			if err := transportUseCase.Start(ctx); err != nil {
 				log.Printf("Error starting stdio transport: %v", err)
+				fmt.Fprintf(os.Stderr, "Error starting stdio transport: %v\n", err)
+				os.Exit(1)
 			}
 		}()
 
-		// In stdio mode, we don't need to start the HTTP server
-		// Just wait for signals
-		return nil
+		// Also start HTTP server in a separate goroutine to allow for debug endpoints
+		go func() {
+			log.Printf("Starting HTTP server for debug endpoints on %s", s.httpServer.Addr)
+			if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("HTTP server error: %v", err)
+			}
+		}()
+
+		// Keep the main goroutine alive
+		select {}
 	}
 
 	// Otherwise, start the HTTP server for SSE mode
-	return s.httpServer.ListenAndServe()
+	log.Println("Starting in SSE transport mode...")
+	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("HTTP server error: %w", err)
+	}
+
+	return nil
 }
 
 // Shutdown gracefully shuts down the server
@@ -175,6 +190,7 @@ func (s *MCPServer) Shutdown(ctx context.Context) error {
 func (s *MCPServer) AddConnectionDebugHandler() {
 	s.httpServer.Handler.(*http.ServeMux).HandleFunc("/debug/connection", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*") // Allow cross-origin requests
 
 		// Test database connection
 		err := s.dbRepo.Ping()
@@ -185,18 +201,71 @@ func (s *MCPServer) AddConnectionDebugHandler() {
 
 		// Collect server information
 		info := map[string]interface{}{
-			"server_status":  "running",
-			"port":           s.config.Port,
-			"db_type":        s.config.DBType,
-			"db_status":      dbStatus,
-			"uptime":         time.Since(s.startTime).String(),
-			"client_ip":      r.RemoteAddr,
-			"headers":        r.Header,
-			"transport_mode": s.transportMode,
+			"server_status":   "running",
+			"port":            s.config.Port,
+			"db_type":         s.config.DBType,
+			"db_status":       dbStatus,
+			"uptime":          time.Since(s.startTime).String(),
+			"client_ip":       r.RemoteAddr,
+			"transport_mode":  s.transportMode,
+			"connection_time": time.Now().Format(time.RFC3339),
 		}
 
-		json.NewEncoder(w).Encode(info)
+		// Send JSON response
+		if err := json.NewEncoder(w).Encode(info); err != nil {
+			log.Printf("Error encoding debug response: %v", err)
+			http.Error(w, "Error generating debug info", http.StatusInternalServerError)
+			return
+		}
 	})
 
-	log.Printf("Connection debug endpoint added at http://localhost:%d/debug/connection", s.config.Port)
+	// Add a simple test endpoint for checking SSE
+	s.httpServer.Handler.(*http.ServeMux).HandleFunc("/test/sse", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		html := `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SSE Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #events { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: auto; }
+        pre { margin: 0; white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>SSE Connection Test</h1>
+    <div id="events"></div>
+    <script>
+        const eventsDiv = document.getElementById('events');
+        const eventSource = new EventSource('/sse');
+
+        eventSource.onopen = function() {
+            addEvent('Connection opened');
+        };
+
+        eventSource.onmessage = function(event) {
+            addEvent('Event received: ' + event.data);
+        };
+
+        eventSource.onerror = function(error) {
+            addEvent('Error: Connection failed');
+            console.error('EventSource error:', error);
+        };
+
+        function addEvent(message) {
+            const time = new Date().toLocaleTimeString();
+            eventsDiv.innerHTML += '<pre>[' + time + '] ' + message + '</pre>';
+            eventsDiv.scrollTop = eventsDiv.scrollHeight;
+        }
+    </script>
+</body>
+</html>
+`
+		w.Write([]byte(html))
+	})
+
+	log.Printf("Debug endpoints added at http://localhost:%d/debug/connection and http://localhost:%d/test/sse", s.config.Port, s.config.Port)
 }
