@@ -3,12 +3,12 @@ package transport
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
 
 	"mcpserver/internal/logger"
+	"mcpserver/internal/mcp"
 	"mcpserver/internal/session"
 	"mcpserver/pkg/jsonrpc"
 )
@@ -32,32 +32,29 @@ const (
 // SSETransport implements the SSE transport for the MCP server
 type SSETransport struct {
 	sessionManager *session.Manager
-	methodHandlers map[string]MethodHandler
+	methodHandlers map[string]mcp.MethodHandler
 	basePath       string
 	mu             sync.RWMutex
 }
-
-// MethodHandler is a function that handles a JSON-RPC method
-type MethodHandler func(req *jsonrpc.Request, sess *session.Session) (interface{}, *jsonrpc.Error)
 
 // NewSSETransport creates a new SSE transport
 func NewSSETransport(sessionManager *session.Manager, basePath string) *SSETransport {
 	return &SSETransport{
 		sessionManager: sessionManager,
-		methodHandlers: make(map[string]MethodHandler),
+		methodHandlers: make(map[string]mcp.MethodHandler),
 		basePath:       basePath,
 	}
 }
 
 // RegisterMethodHandler registers a method handler
-func (t *SSETransport) RegisterMethodHandler(method string, handler MethodHandler) {
+func (t *SSETransport) RegisterMethodHandler(method string, handler mcp.MethodHandler) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.methodHandlers[method] = handler
 }
 
 // GetMethodHandler gets a method handler by name
-func (t *SSETransport) GetMethodHandler(method string) (MethodHandler, bool) {
+func (t *SSETransport) GetMethodHandler(method string) (mcp.MethodHandler, bool) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	handler, ok := t.methodHandlers[method]
@@ -163,173 +160,108 @@ func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Client disconnected: %s", sess.ID)
 }
 
-// HandleMessage handles JSON-RPC message requests
+// HandleMessage handles a JSON-RPC message
 func (t *SSETransport) HandleMessage(w http.ResponseWriter, r *http.Request) {
-	// Check if the request method is POST
-	if r.Method != http.MethodPost {
+	// Set CORS headers
+	w.Header().Set(headerAccessControlAllowOrigin, "*")
+	w.Header().Set(headerAccessControlAllowHeaders, "Content-Type")
+	w.Header().Set(headerAccessControlAllowMethods, "POST, OPTIONS")
+	w.Header().Set(headerContentType, "application/json")
+
+	// Handle preflight requests
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Check request method
+	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Get the session ID
+	// Get session ID from query parameter
 	sessionID := r.URL.Query().Get("sessionId")
 	if sessionID == "" {
-		logger.Error("Missing sessionId parameter")
 		http.Error(w, "Missing sessionId parameter", http.StatusBadRequest)
 		return
 	}
 
-	// Get the session
+	// Get session
 	sess, err := t.sessionManager.GetSession(sessionID)
 	if err != nil {
-		logger.Error("Session not found: %s", sessionID)
-		http.Error(w, "Session not found", http.StatusNotFound)
+		http.Error(w, fmt.Sprintf("Invalid session: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	// Read the request body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		logger.Error("Failed to read request body: %v", err)
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+	// Session is automatically updated when GetSession is called
+
+	// Parse JSON-RPC request
+	var req jsonrpc.Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		logger.Error("Failed to parse JSON-RPC request: %v", err)
+		jsonResponse := &jsonrpc.Response{
+			JSONRPC: jsonrpc.Version,
+			Error:   jsonrpc.ParseError(err),
+		}
+		json.NewEncoder(w).Encode(jsonResponse)
 		return
 	}
-	defer r.Body.Close()
 
 	// Log the request
-	logger.RequestLog(r.Method, r.URL.String(), sessionID, string(body))
+	logger.Debug("Received request: %+v", req)
 
-	// Parse the JSON-RPC request
-	var req jsonrpc.Request
-	err = json.Unmarshal(body, &req)
-	if err != nil {
-		logger.Error("Failed to parse JSON-RPC request: %v", err)
-		resp := jsonrpc.Response{
-			JSONRPC: jsonrpc.Version,
-			Error:   jsonrpc.ParseError(err.Error()),
-		}
-
-		// Send error response
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	// Check if the method exists
+	// Get method handler
 	handler, ok := t.GetMethodHandler(req.Method)
 	if !ok {
 		logger.Error("Method not found: %s", req.Method)
-		resp := jsonrpc.Response{
+		jsonResponse := &jsonrpc.Response{
 			JSONRPC: jsonrpc.Version,
 			ID:      req.ID,
 			Error:   jsonrpc.MethodNotFoundError(req.Method),
 		}
-
-		// Send error response
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(jsonResponse)
 		return
 	}
 
 	// Process the request
-	result, err := t.processRequest(&req, sess, handler)
+	result, jsonRPCErr := t.processRequest(&req, sess, handler)
 
-	// Handle notification (no response expected)
-	if req.IsNotification() {
-		w.WriteHeader(http.StatusAccepted)
-		return
-	}
-
-	// Send the response through the SSE channel
-	if err != nil {
-		// Create an error response
-		var jsonRPCErr *jsonrpc.Error
-
-		// Check if the error is already a jsonrpc.Error
-		if rpcErr, ok := err.(*jsonrpc.Error); ok {
-			jsonRPCErr = rpcErr
-		} else {
-			// Convert generic error to jsonrpc.Error
-			jsonRPCErr = jsonrpc.InternalError(err.Error())
-		}
-
-		resp := jsonrpc.Response{
+	// Create response
+	var jsonResponse *jsonrpc.Response
+	if jsonRPCErr != nil {
+		jsonResponse = &jsonrpc.Response{
 			JSONRPC: jsonrpc.Version,
 			ID:      req.ID,
 			Error:   jsonRPCErr,
 		}
-
-		// Convert to JSON
-		respData, jsonErr := json.Marshal(resp)
-		if jsonErr != nil {
-			logger.Error("Failed to marshal error response: %v", jsonErr)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		// Log the complete response for debugging
-		logger.Debug("Sending error response via SSE: %s", string(respData))
-
-		// Send via SSE
-		sseErr := sess.SendEvent("message", respData)
-		if sseErr != nil {
-			logger.Error("Failed to send error response: %v", sseErr)
-			http.Error(w, "Failed to send response", http.StatusInternalServerError)
-			return
-		}
-
-		// Also send in HTTP response
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(respData)
-
 	} else {
-		// Create a success response
-		resp := jsonrpc.Response{
+		jsonResponse = &jsonrpc.Response{
 			JSONRPC: jsonrpc.Version,
 			ID:      req.ID,
 			Result:  result,
 		}
+	}
 
-		// Convert to JSON
-		respData, jsonErr := json.Marshal(resp)
-		if jsonErr != nil {
-			logger.Error("Failed to marshal success response: %v", jsonErr)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
+	// Log the response
+	responseJSON, _ := json.Marshal(jsonResponse)
+	logger.Debug("Sending response: %s", string(responseJSON))
 
-		// Log the complete response for debugging
-		logger.Debug("Sending success response via SSE: %s", string(respData))
-
-		// Send via SSE
-		sseErr := sess.SendEvent("message", respData)
-		if sseErr != nil {
-			logger.Error("Failed to send success response: %v", sseErr)
-			http.Error(w, "Failed to send response", http.StatusInternalServerError)
-			return
-		}
-
-		// Also send in HTTP response
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(respData)
+	// Write response
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(jsonResponse); err != nil {
+		logger.Error("Failed to encode JSON-RPC response: %v", err)
 	}
 }
 
 // processRequest processes a JSON-RPC request and returns the result or error
-func (t *SSETransport) processRequest(req *jsonrpc.Request, sess *session.Session, handler MethodHandler) (interface{}, *jsonrpc.Error) {
+func (t *SSETransport) processRequest(req *jsonrpc.Request, sess *session.Session, handler mcp.MethodHandler) (interface{}, *jsonrpc.Error) {
 	// Log the request
 	logger.Info("Processing request: method=%s, id=%v", req.Method, req.ID)
 
-	// If params is still a string or []byte, convert it to json.RawMessage
-	if params, ok := req.Params.(string); ok {
-		req.Params = json.RawMessage(params)
-	} else if params, ok := req.Params.([]byte); ok {
-		req.Params = json.RawMessage(params)
-	}
+	// Handle the params type conversion properly
+	// We'll keep the params as they are, and let each handler deal with the type conversion
+	// This avoids any incorrect type assertions
 
 	// Call the method handler
 	result, jsonRPCErr := handler(req, sess)

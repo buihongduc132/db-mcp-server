@@ -193,3 +193,15 @@ func registerExampleTools(mcpHandler *mcp.Handler) {
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details. 
+
+## 📧 Support & Contact
+
+- For questions or issues, email [mnhatlinh.doan@gmail.com](mailto:mnhatlinh.doan@gmail.com)
+- Open an issue directly: [Issue Tracker](https://github.com/VaporScale/cashflow/issues)
+- If cashflow helps your work, please consider supporting:
+
+<p align="">
+<a href="https://www.buymeacoffee.com/linhdmn">
+<img src="https://img.buymeacoffee.com/button-api/?text=Support cashflow&emoji=☕&slug=linhdmn&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" 
+alt="Buy Me A Coffee"/>
+</a>

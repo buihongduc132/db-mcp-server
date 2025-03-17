@@ -57,11 +57,14 @@ func main() {
 		}
 	}()
 
-	// Create MCP handler
-	mcpHandler := mcp.NewHandler()
+	// Create tool registry
+	toolRegistry := tools.NewRegistry()
+
+	// Create MCP handler with the tool registry
+	mcpHandler := mcp.NewHandler(toolRegistry)
 
 	// Register some example tools
-	registerExampleTools(mcpHandler)
+	registerExampleTools(toolRegistry)
 
 	// Create and configure the server based on transport mode
 	switch cfg.TransportMode {
@@ -129,7 +132,7 @@ func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHand
 	logger.Info("Server stopped")
 }
 
-func registerExampleTools(mcpHandler *mcp.Handler) {
+func registerExampleTools(toolRegistry *tools.Registry) {
 	// Example echo tool
 	echoTool := &tools.Tool{
 		Name:        "echo",
@@ -361,19 +364,19 @@ func registerExampleTools(mcpHandler *mcp.Handler) {
 	// Register tools
 	logger.Info("Registering tools:")
 	logger.Info("- echo: Simple echo tool")
-	mcpHandler.RegisterTool(echoTool)
+	toolRegistry.RegisterTool(echoTool)
 
 	logger.Info("- calculator: Mathematical operations tool")
-	mcpHandler.RegisterTool(calculatorTool)
+	toolRegistry.RegisterTool(calculatorTool)
 
 	logger.Info("- timestamp: Timestamp formatting tool")
-	mcpHandler.RegisterTool(timestampTool)
+	toolRegistry.RegisterTool(timestampTool)
 
 	logger.Info("- random: Random number generator")
-	mcpHandler.RegisterTool(randomTool)
+	toolRegistry.RegisterTool(randomTool)
 
 	logger.Info("- text: Text manipulation tool")
-	mcpHandler.RegisterTool(textTool)
+	toolRegistry.RegisterTool(textTool)
 
 	logger.Info("Total tools registered: 5")
 }
