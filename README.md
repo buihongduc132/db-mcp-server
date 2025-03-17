@@ -1,194 +1,147 @@
-# MCP Server with SSE Transport
+# MCP Server
 
-This is a Machine Communication Protocol (MCP) server that uses Server-Sent Events (SSE) as its transport mechanism. The server allows clients to connect, register tools, send requests, and receive responses through a persistent connection.
+A server implementation of the Message Communication Protocol (MCP), designed to be compatible with VS Code and Cursor extensions, as well as other MCP clients.
 
-## Features
+## Overview
 
-- HTTP server that listens on port 9090 (configurable)
-- SSE endpoint for persistent client connections
-- Message endpoint for JSON-RPC requests
-- Multiple concurrent client connections with unique session IDs
-- Session state management for each connected client
-- Heartbeat mechanism to keep connections alive
-- Comprehensive logging
+The MCP (Message Communication Protocol) Server provides a standardized way for AI tools to communicate with client applications. It exposes a set of tools that clients can discover and invoke remotely.
 
-## Architecture
+## Key Features
 
-The server follows a modular architecture:
-
-- `cmd/server`: Main server entry point
-- `internal/config`: Configuration management
-- `internal/logger`: Logging utilities
-- `internal/mcp`: MCP protocol handlers
-- `internal/session`: Session management
-- `internal/transport`: Transport implementations (SSE)
-- `pkg/jsonrpc`: JSON-RPC 2.0 implementation
-- `pkg/tools`: Tool registry and execution
-
-## Communication Flow
-
-1. **Server Initialization**: The server starts and listens on the configured port
-2. **Client Connection**: Clients connect to the SSE endpoint (`/sse`)
-3. **Initial Communication**: The server sends an initial SSE event with the message endpoint URL
-4. **Request Processing**: Clients send JSON-RPC requests to the message endpoint (`/message`)
-5. **Response Delivery**: The server sends responses as SSE events to the appropriate client
-6. **Notification Handling**: Notifications are processed with 202 Accepted status codes
-
-## Supported JSON-RPC Methods
-
-- `initialize`: Set up a client connection with protocol version and capability negotiation
-- `tools/list`: Return a list of available tools
-- `tools/execute`: Execute a specific tool with parameters
-- `notifications/initialized`: Client notification that initialization is complete
-
-## Supported Tools
-
-The server comes with several built-in tools:
-
-1. **Echo Tool**
-   - Simply echoes back the input message
-   - Input: `message` (string)
-   
-2. **Calculator Tool**
-   - Performs basic mathematical operations
-   - Operations: add, subtract, multiply, divide
-   - Input: `operation` (string), `a` (number), `b` (number)
-
-3. **Timestamp Tool**
-   - Returns current timestamp in various formats
-   - Input: `format` (string, optional) - "unix", "rfc3339", or custom Go time format
-
-4. **Random Tool**
-   - Generates random numbers in a specified range
-   - Input: `min` (integer, optional), `max` (integer, optional)
-
-5. **Text Tool**
-   - Performs various text operations
-   - Operations: upper, lower, reverse, count
-   - Input: `operation` (string), `text` (string)
+- Server-Sent Events (SSE) transport layer
+- JSON-RPC message format
+- Tool registry for dynamic tool registration and discovery
+- Editor integration support for VS Code and Cursor
+- Structured error handling
+- Session management
 
 ## Getting Started
 
 ### Prerequisites
 
-- Go 1.21 or higher
-- Make (optional, for using the Makefile)
+- Go 1.18 or later
 
 ### Installation
 
-1. Clone the repository
-2. Install dependencies:
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/mcp-server.git
+   cd mcp-server
+   ```
 
-```bash
-go mod download
-```
+2. Build the server:
+   ```
+   make build
+   ```
+
+3. Run the server:
+   ```
+   ./mcp-server
+   ```
 
 ### Configuration
 
-Create a `.env` file based on the `.env.example` file:
+You can configure the server using environment variables or a `.env` file. See `.env.example` for available options.
 
-```bash
-cp .env.example .env
-```
+## Tool System
 
-Edit the `.env` file to configure the server:
+The MCP Server includes a powerful tool system that allows clients to discover and invoke tools. Each tool has:
 
-```
-# Server Configuration
-SERVER_PORT=9090
-TRANSPORT_MODE=sse
+- A unique name
+- A description
+- A JSON Schema for input validation
+- A handler function that executes the tool's logic
 
-# Database Configuration (if needed)
-DB_TYPE=mysql
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=user
-DB_PASSWORD=password
-DB_NAME=dbname
+### Built-in Tools
 
-# Logging configuration
-LOG_LEVEL=info
-```
+The server comes with several built-in tools:
 
-### Running the Server
+- `echo`: Simple echo tool that returns the input
+- `calculator`: Performs basic arithmetic operations
+- `timestamp`: Returns timestamps in various formats
+- `random`: Generates random numbers
+- `text`: Performs text operations (uppercase, lowercase, reverse, count)
+- `getFileInfo`: Gets information about a file (for editor integration)
+- `completeCode`: Provides code completion suggestions (for editor integration)
+- `analyzeCode`: Analyzes code for issues and improvements (for editor integration)
 
-Using Go directly:
+### Creating Custom Tools
 
-```bash
-go run cmd/server/main.go
-```
-
-Or using the Makefile:
-
-```bash
-make run-sse
-```
-
-### Testing the Server
-
-There are several ways to test the server:
-
-#### 1. Using the Test Script (Recommended, no dependencies)
-
-A bash script is provided to test all functionality without any dependencies:
-
-```bash
-# Run using make
-make test-script
-
-# Or run directly
-./examples/test_script.sh
-```
-
-This will:
-1. Send an initialization request
-2. List all available tools
-3. Test each tool with sample inputs
-4. Display all requests and responses
-
-#### 2. Using the Example Client
-
-The example client requires the `github.com/r3labs/sse/v2` package:
-
-```bash
-go get github.com/r3labs/sse/v2
-go run examples/client/client.go
-```
-
-4. If using Cursor with this server, ensure you're pointing it to the correct URL: `http://localhost:9090`
-
-## Adding New Tools
-
-To add a new tool to the server, modify the `registerExampleTools` function in `cmd/server/main.go`:
+You can create custom tools by implementing the `Tool` interface and registering them with the server:
 
 ```go
-func registerExampleTools(mcpHandler *mcp.Handler) {
-    // Add your tool here
-    myTool := &tools.Tool{
-        Name:        "my-tool",
-        Description: "Description of my tool",
-        InputSchema: map[string]interface{}{
-            "type": "object",
-            "properties": map[string]interface{}{
-                "param1": map[string]interface{}{
-                    "type":        "string",
-                    "description": "Parameter description",
-                },
+// Create a new tool
+myTool := &tools.Tool{
+    Name:        "myTool",
+    Description: "Does something awesome",
+    InputSchema: tools.ToolInputSchema{
+        Type: "object",
+        Properties: map[string]interface{}{
+            "param1": map[string]interface{}{
+                "type":        "string",
+                "description": "First parameter",
             },
-            "required": []string{"param1"},
         },
-        Handler: func(params map[string]interface{}) (interface{}, error) {
-            // Implement your tool logic here
-            return map[string]interface{}{
-                "result": "success",
-            }, nil
-        },
-    }
-
-    // Register the tool
-    mcpHandler.RegisterTool(myTool)
+        Required: []string{"param1"},
+    },
+    Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+        // Tool implementation
+        // ...
+        return result, nil
+    },
 }
+
+// Register the tool
+toolRegistry.RegisterTool(myTool)
 ```
+
+## MCP Protocol
+
+The server implements the MCP protocol as defined in the [MCP specification](https://github.com/microsoft/mcp). Key aspects include:
+
+### Methods
+
+- `initialize`: Initializes the session and returns server capabilities
+- `tools/list`: Lists available tools
+- `tools/call` or `tools/execute`: Executes a tool
+- `editor/context`: Receives editor context updates from the client
+- `cancel`: Cancels a running request
+- `notifications/initialized`: Notification sent by the client after initialization
+- `notifications/tools/list_changed`: Notification sent by the server when tools change
+
+### Tools Execution Flow
+
+1. Client connects to the server via SSE
+2. Client sends an `initialize` request
+3. Server responds with its capabilities, including tools support
+4. Client sends a `tools/list` request to discover available tools
+5. Server responds with a list of available tools
+6. Client sends a `tools/call` request to execute a tool
+7. Server executes the tool and returns the result
+
+## Extending Editor Integration
+
+The server includes support for editor-specific features:
+
+### Editor Context
+
+Clients can send editor context information to the server using the `editor/context` method. This allows tools to be aware of the current state of the editor, such as:
+
+- Current file
+- Selected code
+- Cursor position
+- Open files
+- Project structure
+
+Tools can then use this context to provide more relevant results.
+
+### Progress Reporting
+
+Tools can report progress during execution using the `progressToken` mechanism. This allows clients to display progress indicators for long-running operations.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 

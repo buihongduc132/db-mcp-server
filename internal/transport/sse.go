@@ -70,10 +70,19 @@ func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log request details
+	// Log detailed request information
 	logger.Debug("SSE connection request from: %s", r.RemoteAddr)
 	logger.Debug("User-Agent: %s", r.UserAgent())
 	logger.Debug("Query parameters: %v", r.URL.Query())
+
+	// Log all headers for debugging
+	logger.Debug("------ REQUEST HEADERS ------")
+	for name, values := range r.Header {
+		for _, value := range values {
+			logger.Debug("  %s: %s", name, value)
+		}
+	}
+	logger.Debug("----------------------------")
 
 	// Get or create a session
 	sessionID := r.URL.Query().Get("sessionId")
@@ -110,6 +119,7 @@ func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		logger.SSEEventLog(event, sess.ID, string(data))
 
 		// Format the event according to SSE specification with consistent formatting
+		// Ensure exact format: "event: message\ndata: {...}\n\n"
 		eventText := fmt.Sprintf("event: %s\ndata: %s\n\n", event, string(data))
 
 		// Write the event
@@ -138,6 +148,7 @@ func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Setting message endpoint to: %s", messageEndpoint)
 
 	// Format and send the endpoint event directly as specified in mcp-go
+	// Use the exact format expected: "event: endpoint\ndata: URL\n\n"
 	initialEvent := fmt.Sprintf("event: endpoint\ndata: %s\n\n", messageEndpoint)
 	logger.Info("Sending initial endpoint event to client")
 	logger.Debug("Endpoint event data: %s", initialEvent)
@@ -194,63 +205,82 @@ func (t *SSETransport) HandleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Session is automatically updated when GetSession is called
-
-	// Parse JSON-RPC request
+	// Parse request body as JSON-RPC request
 	var req jsonrpc.Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logger.Error("Failed to parse JSON-RPC request: %v", err)
-		jsonResponse := &jsonrpc.Response{
-			JSONRPC: jsonrpc.Version,
-			Error:   jsonrpc.ParseError(err),
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&req)
+	if err != nil {
+		logger.Error("Failed to decode JSON-RPC request: %v", err)
+		errorResponse := jsonrpc.Error{
+			Code:    jsonrpc.ParseErrorCode,
+			Message: "Invalid JSON: " + err.Error(),
 		}
-		json.NewEncoder(w).Encode(jsonResponse)
+		t.sendErrorResponse(w, nil, &errorResponse)
 		return
 	}
 
-	// Log the request
-	logger.Debug("Received request: %+v", req)
+	// Log received request
+	reqJSON, _ := json.Marshal(req)
+	logger.Debug("Received request: %s", string(reqJSON))
+	logger.Info("Processing request: method=%s, id=%v", req.Method, req.ID)
 
-	// Get method handler
+	// Find handler for the method
 	handler, ok := t.GetMethodHandler(req.Method)
 	if !ok {
 		logger.Error("Method not found: %s", req.Method)
-		jsonResponse := &jsonrpc.Response{
-			JSONRPC: jsonrpc.Version,
-			ID:      req.ID,
-			Error:   jsonrpc.MethodNotFoundError(req.Method),
+		errorResponse := jsonrpc.Error{
+			Code:    jsonrpc.MethodNotFoundCode,
+			Message: fmt.Sprintf("Method not found: %s", req.Method),
 		}
-		json.NewEncoder(w).Encode(jsonResponse)
+		t.sendErrorResponse(w, req.ID, &errorResponse)
 		return
 	}
 
-	// Process the request
-	result, jsonRPCErr := t.processRequest(&req, sess, handler)
+	// Process the request with the handler
+	result, jsonRpcErr := t.processRequest(&req, sess, handler)
 
-	// Create response
-	var jsonResponse *jsonrpc.Response
-	if jsonRPCErr != nil {
-		jsonResponse = &jsonrpc.Response{
-			JSONRPC: jsonrpc.Version,
-			ID:      req.ID,
-			Error:   jsonRPCErr,
-		}
+	// Check if this is a notification (no ID)
+	isNotification := req.ID == nil
+
+	// Send the response back to the client
+	if jsonRpcErr != nil {
+		logger.Debug("Method handler error: %v", jsonRpcErr)
+		t.sendErrorResponse(w, req.ID, jsonRpcErr)
+	} else if isNotification {
+		// For notifications, return 202 Accepted without a response body
+		logger.Debug("Notification processed successfully")
+		w.WriteHeader(http.StatusAccepted)
 	} else {
-		jsonResponse = &jsonrpc.Response{
-			JSONRPC: jsonrpc.Version,
-			ID:      req.ID,
-			Result:  result,
+		resultJSON, _ := json.Marshal(result)
+		logger.Debug("Method handler result: %s", string(resultJSON))
+
+		// Ensure consistent response format for all methods
+		response := map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  result,
 		}
-	}
 
-	// Log the response
-	responseJSON, _ := json.Marshal(jsonResponse)
-	logger.Debug("Sending response: %s", string(responseJSON))
+		responseJSON, err := json.Marshal(response)
+		if err != nil {
+			logger.Error("Failed to marshal response: %v", err)
+			errorResponse := jsonrpc.Error{
+				Code:    jsonrpc.InternalErrorCode,
+				Message: "Failed to marshal response",
+			}
+			t.sendErrorResponse(w, req.ID, &errorResponse)
+			return
+		}
 
-	// Write response
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(jsonResponse); err != nil {
-		logger.Error("Failed to encode JSON-RPC response: %v", err)
+		logger.Debug("Sending response: %s", string(responseJSON))
+
+		// Queue the response to be sent as an event
+		if err := sess.SendEvent("message", responseJSON); err != nil {
+			logger.Error("Failed to queue response event: %v", err)
+		}
+
+		// For the HTTP response, just return 202 Accepted
+		w.WriteHeader(http.StatusAccepted)
 	}
 }
 
@@ -308,5 +338,45 @@ func (t *SSETransport) startHeartbeat(sess *session.Session) {
 			// Session is closed
 			return
 		}
+	}
+}
+
+// sendErrorResponse sends a JSON-RPC error response to the client
+func (t *SSETransport) sendErrorResponse(w http.ResponseWriter, id interface{}, err *jsonrpc.Error) {
+	response := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]interface{}{
+			"code":    err.Code,
+			"message": err.Message,
+		},
+	}
+
+	// If the error has data, include it
+	if err.Data != nil {
+		response["error"].(map[string]interface{})["data"] = err.Data
+	}
+
+	responseJSON, jsonErr := json.Marshal(response)
+	if jsonErr != nil {
+		logger.Error("Failed to marshal error response: %v", jsonErr)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	logger.Debug("Sending error response: %s", string(responseJSON))
+
+	// If this is a parse error or other error that occurs before we have a valid session,
+	// send it directly in the HTTP response
+	if id == nil || w.Header().Get(headerContentType) == "" {
+		w.Header().Set(headerContentType, "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseJSON)
+	} else {
+		// For session-related errors, we'll rely on the direct HTTP response
+		// since we don't have access to the session here
+		w.Header().Set(headerContentType, "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(responseJSON)
 	}
 }

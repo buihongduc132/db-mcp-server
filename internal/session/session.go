@@ -19,12 +19,14 @@ type Session struct {
 	CreatedAt      time.Time
 	LastAccessedAt time.Time
 	Connected      bool
+	Initialized    bool // Flag to track if the client has been initialized
 	ResponseWriter http.ResponseWriter
 	Flusher        http.Flusher
 	EventCallback  EventCallback
 	ctx            context.Context
 	cancel         context.CancelFunc
 	Capabilities   map[string]interface{}
+	Data           map[string]interface{} // Arbitrary session data
 	mu             sync.Mutex
 }
 
@@ -54,6 +56,7 @@ func (m *Manager) CreateSession() *Session {
 		LastAccessedAt: time.Now(),
 		Connected:      false,
 		Capabilities:   make(map[string]interface{}),
+		Data:           make(map[string]interface{}),
 		ctx:            ctx,
 		cancel:         cancel,
 	}
@@ -196,4 +199,43 @@ func (s *Session) Disconnect() {
 	s.Connected = false
 	s.ResponseWriter = nil
 	s.Flusher = nil
+}
+
+// SetInitialized marks the session as initialized
+func (s *Session) SetInitialized(initialized bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Initialized = initialized
+}
+
+// IsInitialized returns whether the session has been initialized
+func (s *Session) IsInitialized() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Initialized
+}
+
+// SetData stores arbitrary data in the session
+func (s *Session) SetData(key string, value interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Data == nil {
+		s.Data = make(map[string]interface{})
+	}
+
+	s.Data[key] = value
+}
+
+// GetData retrieves arbitrary data from the session
+func (s *Session) GetData(key string) (interface{}, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Data == nil {
+		return nil, false
+	}
+
+	value, ok := s.Data[key]
+	return value, ok
 }

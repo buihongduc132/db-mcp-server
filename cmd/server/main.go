@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -64,7 +65,16 @@ func main() {
 	mcpHandler := mcp.NewHandler(toolRegistry)
 
 	// Register some example tools
+	logger.Info("Registering example tools...")
 	registerExampleTools(toolRegistry)
+
+	// Verify tools were registered
+	registeredTools := mcpHandler.ListAvailableTools()
+	if registeredTools == "none" {
+		logger.Error("No tools were registered! Tools won't be available to clients.")
+	} else {
+		logger.Info("Successfully registered tools: %s", registeredTools)
+	}
 
 	// Create and configure the server based on transport mode
 	switch cfg.TransportMode {
@@ -137,17 +147,17 @@ func registerExampleTools(toolRegistry *tools.Registry) {
 	echoTool := &tools.Tool{
 		Name:        "echo",
 		Description: "Echoes back the input",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
 				"message": map[string]interface{}{
 					"type":        "string",
 					"description": "Message to echo",
 				},
 			},
-			"required": []string{"message"},
+			Required: []string{"message"},
 		},
-		Handler: func(params map[string]interface{}) (interface{}, error) {
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 			message, ok := params["message"].(string)
 			if !ok {
 				return nil, fmt.Errorf("message must be a string")
@@ -162,9 +172,9 @@ func registerExampleTools(toolRegistry *tools.Registry) {
 	calculatorTool := &tools.Tool{
 		Name:        "calculator",
 		Description: "Performs basic mathematical operations",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
 				"operation": map[string]interface{}{
 					"type":        "string",
 					"description": "Operation to perform (add, subtract, multiply, divide)",
@@ -179,18 +189,40 @@ func registerExampleTools(toolRegistry *tools.Registry) {
 					"description": "Second number",
 				},
 			},
-			"required": []string{"operation", "a", "b"},
+			Required: []string{"operation", "a", "b"},
 		},
-		Handler: func(params map[string]interface{}) (interface{}, error) {
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 			operation, ok := params["operation"].(string)
 			if !ok {
 				return nil, fmt.Errorf("operation must be a string")
 			}
 
-			a, aOk := params["a"].(float64)
-			b, bOk := params["b"].(float64)
-			if !aOk || !bOk {
-				return nil, fmt.Errorf("a and b must be numbers")
+			a, ok := params["a"].(float64)
+			if !ok {
+				// Try to convert from JSON number
+				if aNum, ok := params["a"].(json.Number); ok {
+					aFloat, err := aNum.Float64()
+					if err != nil {
+						return nil, fmt.Errorf("a must be a number")
+					}
+					a = aFloat
+				} else {
+					return nil, fmt.Errorf("a must be a number")
+				}
+			}
+
+			b, ok := params["b"].(float64)
+			if !ok {
+				// Try to convert from JSON number
+				if bNum, ok := params["b"].(json.Number); ok {
+					bFloat, err := bNum.Float64()
+					if err != nil {
+						return nil, fmt.Errorf("b must be a number")
+					}
+					b = bFloat
+				} else {
+					return nil, fmt.Errorf("b must be a number")
+				}
 			}
 
 			var result float64
@@ -219,20 +251,25 @@ func registerExampleTools(toolRegistry *tools.Registry) {
 	// Timestamp tool
 	timestampTool := &tools.Tool{
 		Name:        "timestamp",
-		Description: "Returns the current timestamp in various formats",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
+		Description: "Returns current timestamp in various formats",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
 				"format": map[string]interface{}{
 					"type":        "string",
-					"description": "Format of the timestamp (unix, rfc3339, or custom Go time format)",
-					"default":     "rfc3339",
+					"description": "Timestamp format (unix, rfc3339, or custom Go time format)",
+					"enum":        []string{"unix", "rfc3339", "iso8601", "custom"},
+				},
+				"customFormat": map[string]interface{}{
+					"type":        "string",
+					"description": "Custom time format (Go time format string)",
 				},
 			},
+			Required: []string{},
 		},
-		Handler: func(params map[string]interface{}) (interface{}, error) {
-			format, ok := params["format"].(string)
-			if !ok {
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			format, _ := params["format"].(string)
+			if format == "" {
 				format = "rfc3339"
 			}
 
@@ -244,8 +281,16 @@ func registerExampleTools(toolRegistry *tools.Registry) {
 				result = fmt.Sprintf("%d", now.Unix())
 			case "rfc3339":
 				result = now.Format(time.RFC3339)
+			case "iso8601":
+				result = now.Format("2006-01-02T15:04:05-0700")
+			case "custom":
+				customFormat, ok := params["customFormat"].(string)
+				if !ok || customFormat == "" {
+					return nil, fmt.Errorf("customFormat is required for custom format")
+				}
+				result = now.Format(customFormat)
 			default:
-				// Try to use the format as a Go time format
+				// Try to use the format string directly
 				result = now.Format(format)
 			}
 
@@ -255,58 +300,74 @@ func registerExampleTools(toolRegistry *tools.Registry) {
 		},
 	}
 
-	// Random number generator tool
+	// Random tool
 	randomTool := &tools.Tool{
 		Name:        "random",
 		Description: "Generates random numbers",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
 				"min": map[string]interface{}{
 					"type":        "integer",
 					"description": "Minimum value (inclusive)",
-					"default":     0,
 				},
 				"max": map[string]interface{}{
 					"type":        "integer",
-					"description": "Maximum value (exclusive)",
-					"default":     100,
+					"description": "Maximum value (inclusive)",
 				},
 			},
+			Required: []string{},
 		},
-		Handler: func(params map[string]interface{}) (interface{}, error) {
-			min := 0
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			// Default min and max
+			min := 1
 			max := 100
 
-			if minParam, ok := params["min"].(float64); ok {
-				min = int(minParam)
+			// Override with params if provided
+			if minParam, ok := params["min"]; ok {
+				if minVal, ok := minParam.(float64); ok {
+					min = int(minVal)
+				} else if minNum, ok := minParam.(json.Number); ok {
+					minInt, err := minNum.Int64()
+					if err == nil {
+						min = int(minInt)
+					}
+				}
 			}
 
-			if maxParam, ok := params["max"].(float64); ok {
-				max = int(maxParam)
+			if maxParam, ok := params["max"]; ok {
+				if maxVal, ok := maxParam.(float64); ok {
+					max = int(maxVal)
+				} else if maxNum, ok := maxParam.(json.Number); ok {
+					maxInt, err := maxNum.Int64()
+					if err == nil {
+						max = int(maxInt)
+					}
+				}
 			}
 
+			// Validate
 			if min >= max {
 				return nil, fmt.Errorf("min must be less than max")
 			}
 
-			// Generate a random number between min and max
-			// Note: This uses a pseudorandom number and isn't cryptographically secure
-			result := min + rand.Intn(max-min)
+			// Generate random number
+			rand.Seed(time.Now().UnixNano())
+			randomNum := rand.Intn(max-min+1) + min
 
 			return map[string]interface{}{
-				"value": result,
+				"random": randomNum,
 			}, nil
 		},
 	}
 
-	// Text tool for string operations
+	// Text tool
 	textTool := &tools.Tool{
 		Name:        "text",
 		Description: "Performs various text operations",
-		InputSchema: map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
 				"operation": map[string]interface{}{
 					"type":        "string",
 					"description": "Operation to perform (upper, lower, reverse, count)",
@@ -317,9 +378,9 @@ func registerExampleTools(toolRegistry *tools.Registry) {
 					"description": "The text to process",
 				},
 			},
-			"required": []string{"operation", "text"},
+			Required: []string{"operation", "text"},
 		},
-		Handler: func(params map[string]interface{}) (interface{}, error) {
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 			operation, ok := params["operation"].(string)
 			if !ok {
 				return nil, fmt.Errorf("operation must be a string")
@@ -361,6 +422,127 @@ func registerExampleTools(toolRegistry *tools.Registry) {
 		},
 	}
 
+	// File info tool - for editor integration
+	fileInfoTool := &tools.Tool{
+		Name:        "getFileInfo",
+		Description: "Gets information about a file in the workspace",
+		Category:    "editor",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
+				"path": map[string]interface{}{
+					"type":        "string",
+					"description": "Path to the file",
+				},
+			},
+			Required: []string{"path"},
+		},
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			path, ok := params["path"].(string)
+			if !ok {
+				return nil, fmt.Errorf("path must be a string")
+			}
+
+			// This is a stub implementation - in a real implementation,
+			// you would use the editor context to access file information
+			return map[string]interface{}{
+				"path":   path,
+				"exists": true,
+				"size":   1024,
+				"type":   "text",
+			}, nil
+		},
+	}
+
+	// Code completion tool - for editor integration
+	codeCompletionTool := &tools.Tool{
+		Name:        "completeCode",
+		Description: "Provides code completion for the current position",
+		Category:    "editor",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
+				"code": map[string]interface{}{
+					"type":        "string",
+					"description": "Code snippet to complete",
+				},
+				"language": map[string]interface{}{
+					"type":        "string",
+					"description": "Programming language",
+				},
+				"line": map[string]interface{}{
+					"type":        "integer",
+					"description": "Line number (0-based)",
+				},
+				"character": map[string]interface{}{
+					"type":        "integer",
+					"description": "Character offset (0-based)",
+				},
+			},
+			Required: []string{"code", "language"},
+		},
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			// This is a stub implementation - in a real implementation,
+			// you would use a language server or similar to provide completions
+			return map[string]interface{}{
+				"completions": []string{
+					"function() { ... }",
+					"class { ... }",
+					"const variable = ...",
+				},
+			}, nil
+		},
+	}
+
+	// Code analysis tool - for editor integration
+	codeAnalysisTool := &tools.Tool{
+		Name:        "analyzeCode",
+		Description: "Analyzes code for issues and improvements",
+		Category:    "editor",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
+				"code": map[string]interface{}{
+					"type":        "string",
+					"description": "Code to analyze",
+				},
+				"language": map[string]interface{}{
+					"type":        "string",
+					"description": "Programming language",
+				},
+				"analysisType": map[string]interface{}{
+					"type":        "string",
+					"description": "Type of analysis to perform",
+					"enum":        []string{"security", "performance", "style", "all"},
+				},
+			},
+			Required: []string{"code", "language"},
+		},
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			// This is a stub implementation
+			return map[string]interface{}{
+				"issues": []map[string]interface{}{
+					{
+						"line":    10,
+						"type":    "warning",
+						"message": "Unused variable",
+					},
+					{
+						"line":    15,
+						"type":    "error",
+						"message": "Null pointer exception possible",
+					},
+				},
+				"suggestions": []map[string]interface{}{
+					{
+						"line":    20,
+						"message": "Consider using a more efficient algorithm",
+					},
+				},
+			}, nil
+		},
+	}
+
 	// Register tools
 	logger.Info("Registering tools:")
 	logger.Info("- echo: Simple echo tool")
@@ -378,5 +560,14 @@ func registerExampleTools(toolRegistry *tools.Registry) {
 	logger.Info("- text: Text manipulation tool")
 	toolRegistry.RegisterTool(textTool)
 
-	logger.Info("Total tools registered: 5")
+	logger.Info("- getFileInfo: File information tool (editor integration)")
+	toolRegistry.RegisterTool(fileInfoTool)
+
+	logger.Info("- completeCode: Code completion tool (editor integration)")
+	toolRegistry.RegisterTool(codeCompletionTool)
+
+	logger.Info("- analyzeCode: Code analysis tool (editor integration)")
+	toolRegistry.RegisterTool(codeAnalysisTool)
+
+	logger.Info("Total tools registered: 8")
 }
