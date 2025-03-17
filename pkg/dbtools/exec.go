@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"mcpserver/pkg/tools"
+	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
 // createExecuteTool creates a tool for executing database statements that don't return rows

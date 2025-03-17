@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"mcpserver/pkg/tools"
+	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
 // createQueryTool creates a tool for executing database queries that return results

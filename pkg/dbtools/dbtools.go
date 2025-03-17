@@ -7,9 +7,9 @@ import (
 	"log"
 	"time"
 
-	"mcpserver/internal/config"
-	"mcpserver/pkg/db"
-	"mcpserver/pkg/tools"
+	"github.com/FreePeak/db-mcp-server/internal/config"
+	"github.com/FreePeak/db-mcp-server/pkg/db"
+	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
 // DatabaseType represents a supported database type

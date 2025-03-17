@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"mcpserver/internal/logger"
-	"mcpserver/internal/mcp"
-	"mcpserver/internal/session"
-	"mcpserver/pkg/jsonrpc"
+	"github.com/FreePeak/db-mcp-server/internal/logger"
+	"github.com/FreePeak/db-mcp-server/internal/mcp"
+	"github.com/FreePeak/db-mcp-server/internal/session"
+	"github.com/FreePeak/db-mcp-server/pkg/jsonrpc"
 )
 
 const (

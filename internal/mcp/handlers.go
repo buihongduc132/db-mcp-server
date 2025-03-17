@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"mcpserver/internal/logger"
-	"mcpserver/internal/session"
-	"mcpserver/pkg/jsonrpc"
-	"mcpserver/pkg/tools"
 	"strings"
 	"time"
+
+	"github.com/FreePeak/db-mcp-server/internal/logger"
+	"github.com/FreePeak/db-mcp-server/internal/session"
+	"github.com/FreePeak/db-mcp-server/pkg/jsonrpc"
+	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
 const (

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"mcpserver/pkg/tools"
+	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
 // Transaction state storage (in-memory)

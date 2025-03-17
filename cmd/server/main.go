@@ -11,13 +11,13 @@ import (
 	"syscall"
 	"time"
 
-	"mcpserver/internal/config"
-	"mcpserver/internal/logger"
-	"mcpserver/internal/mcp"
-	"mcpserver/internal/session"
-	"mcpserver/internal/transport"
-	"mcpserver/pkg/dbtools"
-	"mcpserver/pkg/tools"
+	"github.com/FreePeak/db-mcp-server/internal/config"
+	"github.com/FreePeak/db-mcp-server/internal/logger"
+	"github.com/FreePeak/db-mcp-server/internal/mcp"
+	"github.com/FreePeak/db-mcp-server/internal/session"
+	"github.com/FreePeak/db-mcp-server/internal/transport"
+	"github.com/FreePeak/db-mcp-server/pkg/dbtools"
+	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
 func main() {
