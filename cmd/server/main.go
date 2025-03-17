@@ -4,313 +4,364 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
-	"mcpserver/internal/database"
-	"mcpserver/internal/mcp"
-	"mcpserver/internal/server"
+	"math/rand"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
+
+	"mcpserver/internal/config"
+	"mcpserver/internal/logger"
+	"mcpserver/internal/mcp"
+	"mcpserver/internal/session"
+	"mcpserver/internal/transport"
+	"mcpserver/pkg/tools"
 )
 
 func main() {
-	// Configure logging to use stderr instead of stdout to avoid interfering with JSON protocol
-	log.SetOutput(os.Stderr)
+	// Initialize random number generator
+	rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Parse command line flags
-	var (
-		transportMode = flag.String("transport", "stdio", "Transport mode: stdio or sse")
-		port          = flag.Int("port", 3000, "Server port (only used for SSE transport)")
-	)
+	transportMode := flag.String("t", "", "Transport mode (sse or stdio)")
+	port := flag.Int("port", 0, "Server port")
 	flag.Parse()
 
-	// Create MCP server with capabilities
-	srv := server.NewMCPServer(
-		"mcp-server",
-		"1.0.0",
-		server.WithResourceCapabilities(true, true),
-		server.WithPromptCapabilities(true),
-		server.WithToolCapabilities(true),
-		server.WithLogging(),
-	)
+	// Load configuration
+	cfg := config.LoadConfig()
 
-	// Register database tools
-	registerDatabaseTools(srv)
-
-	// Register Cursor-specific tools
-	registerCursorTools(srv)
-
-	// Create transport based on mode
-	var transport server.Transport
-	switch *transportMode {
-	case "sse":
-		transport = server.NewSSETransport(*port)
-	default:
-		transport = server.NewStdioTransport()
+	// Override config with command line flags if provided
+	if *transportMode != "" {
+		cfg.TransportMode = *transportMode
+	}
+	if *port != 0 {
+		cfg.ServerPort = *port
 	}
 
-	// Handle graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Initialize logger
+	logger.Initialize(cfg.LogLevel)
+	logger.Info("Starting MCP server with %s transport on port %d", cfg.TransportMode, cfg.ServerPort)
 
-	// Setup signal handling
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// Create session manager
+	sessionManager := session.NewManager()
 
+	// Start session cleanup goroutine
 	go func() {
-		<-sigChan
-		log.Println("Shutting down server...")
-		cancel()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			sessionManager.CleanupSessions(30 * time.Minute)
+		}
 	}()
 
-	// Start server
-	if err := transport.Serve(ctx, srv); err != nil {
-		log.Fatalf("Server error: %v", err)
+	// Create MCP handler
+	mcpHandler := mcp.NewHandler()
+
+	// Register some example tools
+	registerExampleTools(mcpHandler)
+
+	// Create and configure the server based on transport mode
+	switch cfg.TransportMode {
+	case "sse":
+		startSSEServer(cfg, sessionManager, mcpHandler)
+	case "stdio":
+		logger.Info("stdio transport not implemented yet")
+		os.Exit(1)
+	default:
+		logger.Error("Unknown transport mode: %s", cfg.TransportMode)
+		os.Exit(1)
 	}
 }
 
-// registerDatabaseTools registers all database-related tools with the server
-func registerDatabaseTools(srv *server.MCPServer) {
-	// Register database query tool
-	srv.AddTool(
-		mcp.Tool{
-			Name:        "db-execute-query",
-			Description: "Execute a SQL query and return the results",
-			Properties: map[string]string{
-				"schema": `{
-					"type": "object",
-					"properties": {
-						"query": {
-							"type": "string",
-							"description": "SQL query to execute"
-						},
-						"args": {
-							"type": "array",
-							"description": "Query arguments (for parameterized queries)",
-							"items": {
-								"type": "string"
-							}
-						}
-					},
-					"required": ["query"]
-				}`,
-			},
-		},
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := database.HandleExecuteQuery(ctx, request.Params.Args)
-			if err != nil {
-				return nil, err
-			}
-			return &mcp.CallToolResult{
-				Result: result,
-			}, nil
-		},
-	)
+func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHandler *mcp.Handler) {
+	// Create SSE transport
+	basePath := ""
+	sseTransport := transport.NewSSETransport(sessionManager, basePath)
 
-	// Register database non-query tool (INSERT, UPDATE, DELETE)
-	srv.AddTool(
-		mcp.Tool{
-			Name:        "db-execute-non-query",
-			Description: "Execute a SQL non-query (INSERT, UPDATE, DELETE) and return affected rows",
-			Properties: map[string]string{
-				"schema": `{
-					"type": "object",
-					"properties": {
-						"query": {
-							"type": "string",
-							"description": "SQL non-query to execute"
-						},
-						"args": {
-							"type": "array",
-							"description": "Query arguments (for parameterized queries)",
-							"items": {
-								"type": "string"
-							}
-						}
-					},
-					"required": ["query"]
-				}`,
-			},
-		},
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := database.HandleExecuteNonQuery(ctx, request.Params.Args)
-			if err != nil {
-				return nil, err
-			}
-			return &mcp.CallToolResult{
-				Result: result,
-			}, nil
-		},
-	)
+	// Register method handlers
+	methodHandlers := mcpHandler.GetAllMethodHandlers()
+	for method, handler := range methodHandlers {
+		sseTransport.RegisterMethodHandler(method, handler)
+	}
 
-	// Register get tables tool
-	srv.AddTool(
-		mcp.Tool{
-			Name:        "db-get-tables",
-			Description: "Get a list of tables in the database",
-			Properties: map[string]string{
-				"schema": `{
-					"type": "object",
-					"properties": {}
-				}`,
-			},
-		},
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := database.HandleGetTables(ctx, request.Params.Args)
-			if err != nil {
-				return nil, err
-			}
-			return &mcp.CallToolResult{
-				Result: result,
-			}, nil
-		},
-	)
+	// Create HTTP server
+	mux := http.NewServeMux()
 
-	// Register get table schema tool
-	srv.AddTool(
-		mcp.Tool{
-			Name:        "db-get-table-schema",
-			Description: "Get the schema of a database table",
-			Properties: map[string]string{
-				"schema": `{
-					"type": "object",
-					"properties": {
-						"table": {
-							"type": "string",
-							"description": "Name of the table"
-						}
-					},
-					"required": ["table"]
-				}`,
-			},
-		},
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := database.HandleGetTableSchema(ctx, request.Params.Args)
-			if err != nil {
-				return nil, err
-			}
-			return &mcp.CallToolResult{
-				Result: result,
-			}, nil
-		},
-	)
+	// Register SSE endpoint
+	mux.HandleFunc("/sse", sseTransport.HandleSSE)
 
-	// Register database ping tool
-	srv.AddTool(
-		mcp.Tool{
-			Name:        "db-ping",
-			Description: "Check database connectivity",
-			Properties: map[string]string{
-				"schema": `{
-					"type": "object",
-					"properties": {}
-				}`,
-			},
-		},
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := database.HandlePingDatabase(ctx, request.Params.Args)
-			if err != nil {
-				return nil, err
-			}
-			return &mcp.CallToolResult{
-				Result: result,
-			}, nil
-		},
-	)
+	// Register message endpoint
+	mux.HandleFunc("/message", sseTransport.HandleMessage)
+
+	// Create server
+	addr := fmt.Sprintf(":%d", cfg.ServerPort)
+	server := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	// Start server in a goroutine
+	go func() {
+		logger.Info("Server listening on %s", addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Server error: %v", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Wait for interrupt signal
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+
+	// Shutdown server gracefully
+	logger.Info("Shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		logger.Error("Server shutdown error: %v", err)
+	}
+
+	logger.Info("Server stopped")
 }
 
-// registerCursorTools registers tools specifically designed for Cursor integration
-func registerCursorTools(srv *server.MCPServer) {
-	// Register Cursor-specific query tool with formatted output
-	srv.AddTool(
-		mcp.Tool{
-			Name:        "cursor-query",
-			Description: "Execute a SQL query and return results formatted for Cursor display",
-			Properties: map[string]string{
-				"schema": `{
-					"type": "object",
-					"properties": {
-						"query": {
-							"type": "string",
-							"description": "SQL query to execute"
-						},
-						"args": {
-							"type": "array",
-							"description": "Query arguments (for parameterized queries)",
-							"items": {
-								"type": "string"
-							}
-						}
-					},
-					"required": ["query"]
-				}`,
-			},
-		},
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := database.HandleCursorQuery(ctx, request.Params.Args)
-			if err != nil {
-				return nil, err
-			}
-			return &mcp.CallToolResult{
-				Result: result,
-			}, nil
-		},
-	)
-
-	// Register database information tool for Cursor
-	srv.AddTool(
-		mcp.Tool{
-			Name:        "cursor-get-database-info",
-			Description: "Get comprehensive database information including tables and schemas",
-			Properties: map[string]string{
-				"schema": `{
-					"type": "object",
-					"properties": {}
-				}`,
-			},
-		},
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := database.HandleGetDatabaseInfo(ctx, request.Params.Args)
-			if err != nil {
-				return nil, err
-			}
-			return &mcp.CallToolResult{
-				Result: result,
-			}, nil
-		},
-	)
-
-	// Add a simple echo tool for testing Cursor connectivity
-	srv.AddTool(
-		mcp.Tool{
-			Name:        "cursor-echo",
-			Description: "Echo back the input message (for testing Cursor connectivity)",
-			Properties: map[string]string{
-				"schema": `{
-					"type": "object",
-					"properties": {
-						"message": {
-							"type": "string",
-							"description": "Message to echo back"
-						}
-					},
-					"required": ["message"]
-				}`,
-			},
-		},
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			var message string
-			if msgVal, ok := request.Params.Args["message"]; ok {
-				message = fmt.Sprintf("%v", msgVal)
-			} else {
-				message = "No message provided"
-			}
-
-			return &mcp.CallToolResult{
-				Result: map[string]string{
-					"echo": message,
+func registerExampleTools(mcpHandler *mcp.Handler) {
+	// Example echo tool
+	echoTool := &tools.Tool{
+		Name:        "echo",
+		Description: "Echoes back the input",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"message": map[string]interface{}{
+					"type":        "string",
+					"description": "Message to echo",
 				},
+			},
+			"required": []string{"message"},
+		},
+		Handler: func(params map[string]interface{}) (interface{}, error) {
+			message, ok := params["message"].(string)
+			if !ok {
+				return nil, fmt.Errorf("message must be a string")
+			}
+			return map[string]interface{}{
+				"message": message,
 			}, nil
 		},
-	)
+	}
+
+	// Calculator tool
+	calculatorTool := &tools.Tool{
+		Name:        "calculator",
+		Description: "Performs basic mathematical operations",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"operation": map[string]interface{}{
+					"type":        "string",
+					"description": "Operation to perform (add, subtract, multiply, divide)",
+					"enum":        []string{"add", "subtract", "multiply", "divide"},
+				},
+				"a": map[string]interface{}{
+					"type":        "number",
+					"description": "First number",
+				},
+				"b": map[string]interface{}{
+					"type":        "number",
+					"description": "Second number",
+				},
+			},
+			"required": []string{"operation", "a", "b"},
+		},
+		Handler: func(params map[string]interface{}) (interface{}, error) {
+			operation, ok := params["operation"].(string)
+			if !ok {
+				return nil, fmt.Errorf("operation must be a string")
+			}
+
+			a, aOk := params["a"].(float64)
+			b, bOk := params["b"].(float64)
+			if !aOk || !bOk {
+				return nil, fmt.Errorf("a and b must be numbers")
+			}
+
+			var result float64
+			switch operation {
+			case "add":
+				result = a + b
+			case "subtract":
+				result = a - b
+			case "multiply":
+				result = a * b
+			case "divide":
+				if b == 0 {
+					return nil, fmt.Errorf("division by zero")
+				}
+				result = a / b
+			default:
+				return nil, fmt.Errorf("unknown operation: %s", operation)
+			}
+
+			return map[string]interface{}{
+				"result": result,
+			}, nil
+		},
+	}
+
+	// Timestamp tool
+	timestampTool := &tools.Tool{
+		Name:        "timestamp",
+		Description: "Returns the current timestamp in various formats",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"format": map[string]interface{}{
+					"type":        "string",
+					"description": "Format of the timestamp (unix, rfc3339, or custom Go time format)",
+					"default":     "rfc3339",
+				},
+			},
+		},
+		Handler: func(params map[string]interface{}) (interface{}, error) {
+			format, ok := params["format"].(string)
+			if !ok {
+				format = "rfc3339"
+			}
+
+			now := time.Now()
+			var result string
+
+			switch format {
+			case "unix":
+				result = fmt.Sprintf("%d", now.Unix())
+			case "rfc3339":
+				result = now.Format(time.RFC3339)
+			default:
+				// Try to use the format as a Go time format
+				result = now.Format(format)
+			}
+
+			return map[string]interface{}{
+				"timestamp": result,
+			}, nil
+		},
+	}
+
+	// Random number generator tool
+	randomTool := &tools.Tool{
+		Name:        "random",
+		Description: "Generates random numbers",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"min": map[string]interface{}{
+					"type":        "integer",
+					"description": "Minimum value (inclusive)",
+					"default":     0,
+				},
+				"max": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum value (exclusive)",
+					"default":     100,
+				},
+			},
+		},
+		Handler: func(params map[string]interface{}) (interface{}, error) {
+			min := 0
+			max := 100
+
+			if minParam, ok := params["min"].(float64); ok {
+				min = int(minParam)
+			}
+
+			if maxParam, ok := params["max"].(float64); ok {
+				max = int(maxParam)
+			}
+
+			if min >= max {
+				return nil, fmt.Errorf("min must be less than max")
+			}
+
+			// Generate a random number between min and max
+			// Note: This uses a pseudorandom number and isn't cryptographically secure
+			result := min + rand.Intn(max-min)
+
+			return map[string]interface{}{
+				"value": result,
+			}, nil
+		},
+	}
+
+	// Text tool for string operations
+	textTool := &tools.Tool{
+		Name:        "text",
+		Description: "Performs various text operations",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"operation": map[string]interface{}{
+					"type":        "string",
+					"description": "Operation to perform (upper, lower, reverse, count)",
+					"enum":        []string{"upper", "lower", "reverse", "count"},
+				},
+				"text": map[string]interface{}{
+					"type":        "string",
+					"description": "The text to process",
+				},
+			},
+			"required": []string{"operation", "text"},
+		},
+		Handler: func(params map[string]interface{}) (interface{}, error) {
+			operation, ok := params["operation"].(string)
+			if !ok {
+				return nil, fmt.Errorf("operation must be a string")
+			}
+
+			text, ok := params["text"].(string)
+			if !ok {
+				return nil, fmt.Errorf("text must be a string")
+			}
+
+			var result interface{}
+			switch operation {
+			case "upper":
+				result = strings.ToUpper(text)
+			case "lower":
+				result = strings.ToLower(text)
+			case "reverse":
+				// Reverse the string
+				runes := []rune(text)
+				for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+					runes[i], runes[j] = runes[j], runes[i]
+				}
+				result = string(runes)
+			case "count":
+				// Count characters and words
+				words := len(strings.Fields(text))
+				chars := len(text)
+				result = map[string]int{
+					"characters": chars,
+					"words":      words,
+				}
+			default:
+				return nil, fmt.Errorf("unknown operation: %s", operation)
+			}
+
+			return map[string]interface{}{
+				"result": result,
+			}, nil
+		},
+	}
+
+	// Register tools
+	mcpHandler.RegisterTool(echoTool)
+	mcpHandler.RegisterTool(calculatorTool)
+	mcpHandler.RegisterTool(timestampTool)
+	mcpHandler.RegisterTool(randomTool)
+	mcpHandler.RegisterTool(textTool)
 }
