@@ -1,6 +1,6 @@
 <div align="center">
 
-# MCP Server
+# DB MCP Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Go Report Card](https://goreportcard.com/badge/github.com/FreePeak/mcp-server)](https://goreportcard.com/report/github.com/FreePeak/mcp-server)

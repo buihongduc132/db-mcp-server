@@ -1,4 +1,4 @@
-module github.com/FreePeak/mcp-server
+module github.com/FreePeak/db-mcp-server
 
 go 1.21
 
