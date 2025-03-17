@@ -1,18 +1,43 @@
 package tools
 
 import (
+	"fmt"
 	"sync"
 )
 
 // Tool represents a tool that can be executed by the MCP server
 type Tool struct {
-	Name        string
-	Description string
-	InputSchema map[string]interface{}
-	Handler     func(params map[string]interface{}) (interface{}, error)
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	InputSchema map[string]interface{} `json:"schema"`
+	Handler     ToolHandler
 }
 
-// Registry manages the available tools
+// Result represents a tool execution result
+type Result struct {
+	Result  interface{} `json:"result,omitempty"`
+	Content []Content   `json:"content,omitempty"`
+	IsError bool        `json:"isError,omitempty"`
+}
+
+// Content represents content in a tool execution result
+type Content struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+// NewTextContent creates a new text content
+func NewTextContent(text string) Content {
+	return Content{
+		Type: "text",
+		Text: text,
+	}
+}
+
+// ToolHandler is a function that handles a tool execution
+type ToolHandler func(params map[string]interface{}) (interface{}, error)
+
+// Registry is a registry of tools
 type Registry struct {
 	tools map[string]*Tool
 	mu    sync.RWMutex
@@ -40,7 +65,7 @@ func (r *Registry) GetTool(name string) (*Tool, bool) {
 	return tool, ok
 }
 
-// GetAllTools gets all registered tools
+// GetAllTools returns all registered tools
 func (r *Registry) GetAllTools() []*Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -49,15 +74,14 @@ func (r *Registry) GetAllTools() []*Tool {
 	for _, tool := range r.tools {
 		tools = append(tools, tool)
 	}
-
 	return tools
 }
 
-// ExecuteTool executes a tool with the given parameters
+// ExecuteTool executes a tool with the given name and parameters
 func (r *Registry) ExecuteTool(name string, params map[string]interface{}) (interface{}, error) {
 	tool, ok := r.GetTool(name)
 	if !ok {
-		return nil, ErrToolNotFound
+		return nil, fmt.Errorf("tool not found: %s", name)
 	}
 
 	return tool.Handler(params)

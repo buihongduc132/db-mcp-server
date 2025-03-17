@@ -1,4 +1,4 @@
-.PHONY: build run-stdio run-sse clean test client
+.PHONY: build run-stdio run-sse clean test client client-simple test-script
 
 # Build the server
 build:
@@ -9,13 +9,22 @@ run-stdio: build
 	./mcp-server --transport stdio
 
 # Run the server in SSE mode
-run-sse: build
-	./mcp-server -t sse
+run-sse: clean build
+	./mcp-server -t sse -port 9090
 
 # Build and run the example client
 client:
 	go build -o mcp-client examples/client/client.go
 	./mcp-client
+
+# Build and run the simple client (no SSE dependency)
+client-simple:
+	go build -o mcp-simple-client examples/client/simple_client.go
+	./mcp-simple-client
+
+# Run the test script
+test-script:
+	./examples/test_script.sh
 
 # Run tests
 test:
@@ -23,7 +32,7 @@ test:
 
 # Clean build artifacts
 clean:
-	rm -f mcp-server mcp-client
+	rm -f mcp-server mcp-client mcp-simple-client
 
 # Default target
 all: build 

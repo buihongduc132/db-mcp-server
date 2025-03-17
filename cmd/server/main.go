@@ -78,7 +78,7 @@ func main() {
 
 func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHandler *mcp.Handler) {
 	// Create SSE transport
-	basePath := ""
+	basePath := fmt.Sprintf("http://localhost:%d", cfg.ServerPort)
 	sseTransport := transport.NewSSETransport(sessionManager, basePath)
 
 	// Register method handlers
@@ -359,9 +359,21 @@ func registerExampleTools(mcpHandler *mcp.Handler) {
 	}
 
 	// Register tools
+	logger.Info("Registering tools:")
+	logger.Info("- echo: Simple echo tool")
 	mcpHandler.RegisterTool(echoTool)
+
+	logger.Info("- calculator: Mathematical operations tool")
 	mcpHandler.RegisterTool(calculatorTool)
+
+	logger.Info("- timestamp: Timestamp formatting tool")
 	mcpHandler.RegisterTool(timestampTool)
+
+	logger.Info("- random: Random number generator")
 	mcpHandler.RegisterTool(randomTool)
+
+	logger.Info("- text: Text manipulation tool")
 	mcpHandler.RegisterTool(textTool)
+
+	logger.Info("Total tools registered: 5")
 }

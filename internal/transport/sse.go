@@ -68,9 +68,15 @@ func (t *SSETransport) GetMethodHandler(method string) (MethodHandler, bool) {
 func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	// Check if the request method is GET
 	if r.Method != http.MethodGet {
+		logger.Error("Method not allowed: %s, expected GET", r.Method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	// Log request details
+	logger.Debug("SSE connection request from: %s", r.RemoteAddr)
+	logger.Debug("User-Agent: %s", r.UserAgent())
+	logger.Debug("Query parameters: %v", r.URL.Query())
 
 	// Get or create a session
 	sessionID := r.URL.Query().Get("sessionId")
@@ -106,8 +112,11 @@ func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		// Log the event
 		logger.SSEEventLog(event, sess.ID, string(data))
 
+		// Format the event according to SSE specification with consistent formatting
+		eventText := fmt.Sprintf("event: %s\ndata: %s\n\n", event, string(data))
+
 		// Write the event
-		_, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+		_, err := fmt.Fprint(w, eventText)
 		if err != nil {
 			logger.Error("Error writing event to client: %v", err)
 			return err
@@ -128,24 +137,23 @@ func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send initial message with the message endpoint
-	initialMessage := map[string]string{
-		"sessionId":       sess.ID,
-		"messageEndpoint": fmt.Sprintf("%s/message?sessionId=%s", t.basePath, sess.ID),
-		"status":          "connected",
-	}
+	messageEndpoint := fmt.Sprintf("%s/message?sessionId=%s", t.basePath, sess.ID)
+	logger.Info("Setting message endpoint to: %s", messageEndpoint)
 
-	initialData, err := json.Marshal(initialMessage)
+	// Format and send the endpoint event directly as specified in mcp-go
+	initialEvent := fmt.Sprintf("event: endpoint\ndata: %s\n\n", messageEndpoint)
+	logger.Info("Sending initial endpoint event to client")
+	logger.Debug("Endpoint event data: %s", initialEvent)
+
+	// Write directly to the response writer instead of using SendEvent
+	_, err = fmt.Fprint(w, initialEvent)
 	if err != nil {
-		logger.Error("Failed to marshal initial message: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		logger.Error("Failed to send initial endpoint event: %v", err)
 		return
 	}
 
-	err = sess.SendEvent("connection", initialData)
-	if err != nil {
-		logger.Error("Failed to send initial event: %v", err)
-		return
-	}
+	// Flush to ensure the client receives the event immediately
+	sess.Flusher.Flush()
 
 	// Start heartbeat in a separate goroutine
 	go t.startHeartbeat(sess)
@@ -261,6 +269,9 @@ func (t *SSETransport) HandleMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Log the complete response for debugging
+		logger.Debug("Sending error response via SSE: %s", string(respData))
+
 		// Send via SSE
 		sseErr := sess.SendEvent("message", respData)
 		if sseErr != nil {
@@ -290,6 +301,9 @@ func (t *SSETransport) HandleMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Log the complete response for debugging
+		logger.Debug("Sending success response via SSE: %s", string(respData))
+
 		// Send via SSE
 		sseErr := sess.SendEvent("message", respData)
 		if sseErr != nil {
@@ -310,6 +324,13 @@ func (t *SSETransport) processRequest(req *jsonrpc.Request, sess *session.Sessio
 	// Log the request
 	logger.Info("Processing request: method=%s, id=%v", req.Method, req.ID)
 
+	// If params is still a string or []byte, convert it to json.RawMessage
+	if params, ok := req.Params.(string); ok {
+		req.Params = json.RawMessage(params)
+	} else if params, ok := req.Params.([]byte); ok {
+		req.Params = json.RawMessage(params)
+	}
+
 	// Call the method handler
 	result, jsonRPCErr := handler(req, sess)
 
@@ -317,6 +338,10 @@ func (t *SSETransport) processRequest(req *jsonrpc.Request, sess *session.Sessio
 		logger.Error("Method handler error: %v", jsonRPCErr)
 		return nil, jsonRPCErr
 	}
+
+	// Log the result for debugging
+	resultJSON, _ := json.Marshal(result)
+	logger.Debug("Method handler result: %s", string(resultJSON))
 
 	return result, nil
 }
@@ -334,20 +359,19 @@ func (t *SSETransport) startHeartbeat(sess *session.Session) {
 				return
 			}
 
-			// Send heartbeat
-			heartbeat := map[string]string{"type": "heartbeat", "timestamp": time.Now().String()}
-			data, err := json.Marshal(heartbeat)
-			if err != nil {
-				logger.Error("Failed to marshal heartbeat: %v", err)
-				continue
-			}
+			// Format the heartbeat timestamp
+			timestamp := time.Now().Format(time.RFC3339)
 
-			err = sess.SendEvent("heartbeat", data)
+			// Use the existing SendEvent method which handles thread safety internally
+			err := sess.SendEvent("heartbeat", []byte(timestamp))
 			if err != nil {
 				logger.Error("Failed to send heartbeat: %v", err)
 				sess.Disconnect()
 				return
 			}
+
+			logger.Debug("Heartbeat sent to client: %s", sess.ID)
+
 		case <-sess.Context().Done():
 			// Session is closed
 			return

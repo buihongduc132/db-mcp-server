@@ -1,24 +1,21 @@
 package jsonrpc
 
 import (
-	"encoding/json"
 	"fmt"
 )
 
-const (
-	// Version is the JSON-RPC version
-	Version = "2.0"
-)
+// Version is the JSON-RPC version string
+const Version = "2.0"
 
 // Request represents a JSON-RPC request
 type Request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      interface{}     `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
+	JSONRPC string      `json:"jsonrpc"`
+	ID      interface{} `json:"id,omitempty"`
+	Method  string      `json:"method"`
+	Params  interface{} `json:"params,omitempty"`
 }
 
-// IsNotification returns true if the request is a notification (no ID)
+// IsNotification returns true if the request is a notification (has no ID)
 func (r *Request) IsNotification() bool {
 	return r.ID == nil
 }
@@ -38,7 +35,7 @@ type Error struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
-// Standard error codes as defined in the JSON-RPC 2.0 spec
+// Standard error codes
 const (
 	ParseErrorCode     = -32700
 	InvalidRequestCode = -32600
@@ -77,27 +74,47 @@ func NewError(code int, message string, data interface{}) *Error {
 	}
 }
 
-// ParseError creates a parse error
+// ParseError creates a Parse Error
 func ParseError(data interface{}) *Error {
-	return NewError(ParseErrorCode, "Parse error", data)
+	return &Error{
+		Code:    ParseErrorCode,
+		Message: "Parse error",
+		Data:    data,
+	}
 }
 
-// InvalidRequestError creates an invalid request error
+// InvalidRequestError creates an Invalid Request error
 func InvalidRequestError(data interface{}) *Error {
-	return NewError(InvalidRequestCode, "Invalid Request", data)
+	return &Error{
+		Code:    InvalidRequestCode,
+		Message: "Invalid request",
+		Data:    data,
+	}
 }
 
-// MethodNotFoundError creates a method not found error
-func MethodNotFoundError(data interface{}) *Error {
-	return NewError(MethodNotFoundCode, "Method not found", data)
+// MethodNotFoundError creates a Method Not Found error
+func MethodNotFoundError(method string) *Error {
+	return &Error{
+		Code:    MethodNotFoundCode,
+		Message: "Method not found",
+		Data:    method,
+	}
 }
 
-// InvalidParamsError creates an invalid params error
+// InvalidParamsError creates an Invalid Params error
 func InvalidParamsError(data interface{}) *Error {
-	return NewError(InvalidParamsCode, "Invalid params", data)
+	return &Error{
+		Code:    InvalidParamsCode,
+		Message: "Invalid params",
+		Data:    data,
+	}
 }
 
-// InternalError creates an internal error
+// InternalError creates an Internal Error
 func InternalError(data interface{}) *Error {
-	return NewError(InternalErrorCode, "Internal error", data)
+	return &Error{
+		Code:    InternalErrorCode,
+		Message: "Internal error",
+		Data:    data,
+	}
 }

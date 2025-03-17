@@ -4,7 +4,7 @@ This is a Machine Communication Protocol (MCP) server that uses Server-Sent Even
 
 ## Features
 
-- HTTP server that listens on port 8080 (configurable)
+- HTTP server that listens on port 9090 (configurable)
 - SSE endpoint for persistent client connections
 - Message endpoint for JSON-RPC requests
 - Multiple concurrent client connections with unique session IDs
@@ -38,7 +38,34 @@ The server follows a modular architecture:
 
 - `initialize`: Set up a client connection with protocol version and capability negotiation
 - `tools/list`: Return a list of available tools
+- `tools/execute`: Execute a specific tool with parameters
 - `notifications/initialized`: Client notification that initialization is complete
+
+## Supported Tools
+
+The server comes with several built-in tools:
+
+1. **Echo Tool**
+   - Simply echoes back the input message
+   - Input: `message` (string)
+   
+2. **Calculator Tool**
+   - Performs basic mathematical operations
+   - Operations: add, subtract, multiply, divide
+   - Input: `operation` (string), `a` (number), `b` (number)
+
+3. **Timestamp Tool**
+   - Returns current timestamp in various formats
+   - Input: `format` (string, optional) - "unix", "rfc3339", or custom Go time format
+
+4. **Random Tool**
+   - Generates random numbers in a specified range
+   - Input: `min` (integer, optional), `max` (integer, optional)
+
+5. **Text Tool**
+   - Performs various text operations
+   - Operations: upper, lower, reverse, count
+   - Input: `operation` (string), `text` (string)
 
 ## Getting Started
 
@@ -68,7 +95,7 @@ Edit the `.env` file to configure the server:
 
 ```
 # Server Configuration
-SERVER_PORT=8080
+SERVER_PORT=9090
 TRANSPORT_MODE=sse
 
 # Database Configuration (if needed)
@@ -97,19 +124,38 @@ Or using the Makefile:
 make run-sse
 ```
 
-### Testing with the Example Client
+### Testing the Server
+
+There are several ways to test the server:
+
+#### 1. Using the Test Script (Recommended, no dependencies)
+
+A bash script is provided to test all functionality without any dependencies:
+
+```bash
+# Run using make
+make test-script
+
+# Or run directly
+./examples/test_script.sh
+```
+
+This will:
+1. Send an initialization request
+2. List all available tools
+3. Test each tool with sample inputs
+4. Display all requests and responses
+
+#### 2. Using the Example Client
 
 The example client requires the `github.com/r3labs/sse/v2` package:
 
 ```bash
 go get github.com/r3labs/sse/v2
-```
-
-Run the example client:
-
-```bash
 go run examples/client/client.go
 ```
+
+4. If using Cursor with this server, ensure you're pointing it to the correct URL: `http://localhost:9090`
 
 ## Adding New Tools
 
