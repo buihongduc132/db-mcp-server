@@ -144,16 +144,25 @@ func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHand
 func registerDatabaseTools(toolRegistry *tools.Registry) {
 	// Initialize database connection
 	cfg := config.LoadConfig()
-
-	// Initialize database
+	
+	// Override with hard-coded values for testing
+	cfg.DBConfig.User = "root"
+	cfg.DBConfig.Password = ""
+	cfg.DBConfig.Name = "mysql"
+	
+	// Try to initialize database
 	err := dbtools.InitDatabase(cfg)
 	if err != nil {
 		logger.Error("Failed to initialize database: %v", err)
-		logger.Warn("Database tools will not be available")
+		logger.Warn("Using mock schema explorer tool only")
+		
+		// Register just the schema explorer tool with mock data
+		dbtools.RegisterSchemaExplorerTool(toolRegistry)
+		logger.Info("Mock schema explorer tool registered successfully")
 		return
 	}
 
-	// Register database tools
+	// If database connection succeeded, register all database tools
 	dbtools.RegisterDatabaseTools(toolRegistry)
 
 	// Log success

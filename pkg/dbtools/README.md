@@ -7,6 +7,7 @@ This package provides tools for interacting with databases in the MCP Server. It
 - Database query tool for executing SELECT statements
 - Database execute tool for executing non-query statements (INSERT, UPDATE, DELETE)
 - Transaction management tool for executing multiple statements atomically
+- Schema explorer tool for auto-discovering database structure and relationships
 - Support for both MySQL and PostgreSQL databases
 - Parameterized queries to prevent SQL injection
 - Connection pooling for optimal performance
@@ -128,6 +129,129 @@ Manages database transactions for executing multiple statements atomically.
   "status": "committed"
 }
 ```
+
+### 4. Database Schema Explorer Tool (`dbSchema`)
+
+Auto-discovers database structure and relationships, including tables, columns, and foreign keys.
+
+**Parameters:**
+- `component` (string, required): Schema component to explore (tables, columns, relationships, or full)
+- `table` (string): Table name (required when component is 'columns' and optional for 'relationships')
+- `timeout` (integer): Query timeout in milliseconds (default: 10000)
+
+**Example - Get All Tables:**
+```json
+{
+  "component": "tables"
+}
+```
+
+**Returns:**
+```json
+{
+  "tables": [
+    {
+      "name": "users",
+      "type": "BASE TABLE",
+      "engine": "InnoDB",
+      "estimated_row_count": 1500,
+      "create_time": "2023-01-15T10:30:45Z",
+      "update_time": "2023-06-20T14:15:30Z"
+    },
+    {
+      "name": "orders",
+      "type": "BASE TABLE",
+      "engine": "InnoDB",
+      "estimated_row_count": 8750,
+      "create_time": "2023-01-15T10:35:12Z",
+      "update_time": "2023-06-25T09:40:18Z"
+    }
+  ],
+  "count": 2,
+  "type": "mysql"
+}
+```
+
+**Example - Get Table Columns:**
+```json
+{
+  "component": "columns",
+  "table": "users"
+}
+```
+
+**Returns:**
+```json
+{
+  "table": "users",
+  "columns": [
+    {
+      "name": "id",
+      "type": "int(11)",
+      "nullable": "NO",
+      "key": "PRI",
+      "extra": "auto_increment",
+      "default": null,
+      "max_length": null,
+      "numeric_precision": 10,
+      "numeric_scale": 0,
+      "comment": "User unique identifier"
+    },
+    {
+      "name": "email",
+      "type": "varchar(255)",
+      "nullable": "NO",
+      "key": "UNI",
+      "extra": "",
+      "default": null,
+      "max_length": 255,
+      "numeric_precision": null,
+      "numeric_scale": null,
+      "comment": "User email address"
+    }
+  ],
+  "count": 2,
+  "type": "mysql"
+}
+```
+
+**Example - Get Relationships:**
+```json
+{
+  "component": "relationships",
+  "table": "orders"
+}
+```
+
+**Returns:**
+```json
+{
+  "relationships": [
+    {
+      "constraint_name": "fk_orders_users",
+      "table_name": "orders",
+      "column_name": "user_id",
+      "referenced_table_name": "users",
+      "referenced_column_name": "id",
+      "update_rule": "CASCADE",
+      "delete_rule": "RESTRICT"
+    }
+  ],
+  "count": 1,
+  "type": "mysql",
+  "table": "orders"
+}
+```
+
+**Example - Get Full Schema:**
+```json
+{
+  "component": "full"
+}
+```
+
+**Returns:**
+A comprehensive schema including tables, columns, and relationships in a structured format.
 
 ## Setup
 

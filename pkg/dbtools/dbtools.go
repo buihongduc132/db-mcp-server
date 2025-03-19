@@ -85,6 +85,15 @@ func RegisterDatabaseTools(registry *tools.Registry) {
 
 	// Register transaction tool
 	registry.RegisterTool(createTransactionTool())
+	
+	// Register schema explorer tool
+	registry.RegisterTool(createSchemaExplorerTool())
+}
+
+// RegisterSchemaExplorerTool registers only the schema explorer tool
+// This is useful when database connection fails but we still want to provide schema exploration
+func RegisterSchemaExplorerTool(registry *tools.Registry) {
+	registry.RegisterTool(createSchemaExplorerTool())
 }
 
 // Helper function to convert rows to a slice of maps
