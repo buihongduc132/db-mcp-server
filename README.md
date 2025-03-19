@@ -87,12 +87,16 @@ DB MCP Server can be configured via environment variables or a `.env` file:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MCP_PORT` | Server port | `8080` |
-| `MCP_HOST` | Server host | `localhost` |
-| `LOG_LEVEL` | Logging level (debug, info, warn, error) | `info` |
-| `DB_DRIVER` | Database driver (mysql, postgres) | `none` |
-| `DB_CONNECTION` | Database connection string | `""` |
-| `SESSION_TTL` | Session time-to-live in seconds | `3600` |
+| `SERVER_PORT` | Server port | `9092` |
+| `TRANSPORT_MODE` | Transport mode (stdio, sse) | `stdio` |
+| `LOG_LEVEL` | Logging level (debug, info, warn, error) | `debug` |
+| `DB_TYPE` | Database type (mysql, postgres) | `mysql` |
+| `DB_HOST` | Database host | `localhost` |
+| `DB_PORT` | Database port | `3306` |
+| `DB_USER` | Database username | `iamrevisto` |
+| `DB_PASSWORD` | Database password | `password` |
+| `DB_NAME` | Database name | `revisto` |
+| `DB_ROOT_PASSWORD` | Database root password (for container setup) | `root_password` |
 
 See `.env.example` for more configuration options.
 
@@ -208,8 +212,48 @@ The server currently includes three core database tools:
 | `dbQuery` | Executes read-only SQL queries with parameterized inputs |
 | `dbExecute` | Performs data modification operations (INSERT, UPDATE, DELETE) |
 | `dbTransaction` | Manages SQL transactions with commit and rollback support |
-| `dbSchema` | Rapid database exploration without writing SQL queries |
 
+### Database Schema Explorer Tool
+
+The MCP Server includes a powerful Database Schema Explorer tool (`dbSchema`) that auto-discovers your database structure and relationships:
+
+```json
+// Get all tables in the database
+{
+  "name": "dbSchema",
+  "arguments": {
+    "component": "tables"
+  }
+}
+
+// Get columns for a specific table
+{
+  "name": "dbSchema",
+  "arguments": {
+    "component": "columns",
+    "table": "users"
+  }
+}
+
+// Get relationships for a specific table or all relationships
+{
+  "name": "dbSchema",
+  "arguments": {
+    "component": "relationships",
+    "table": "orders"
+  }
+}
+
+// Get the full database schema
+{
+  "name": "dbSchema",
+  "arguments": {
+    "component": "full"
+  }
+}
+```
+
+The Schema Explorer supports both MySQL and PostgreSQL databases and automatically adapts to your configured database type.
 
 ### Editor Integration
 
@@ -226,7 +270,7 @@ The server includes support for editor-specific features through the `editor/con
 We're committed to expanding DB MCP Server's capabilities. Here's our planned development roadmap:
 
 ### Q2 2025
-- **Schema Explorer** - Auto-discover database structure and relationships --> Completed
+- **Schema Explorer** - Auto-discover database structure and relationships
 - **Query Builder** - Visual SQL query construction with syntax validation
 - **Performance Analyzer** - Identify slow queries and optimization opportunities
 
