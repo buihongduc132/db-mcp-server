@@ -212,6 +212,7 @@ The server currently includes three core database tools:
 | `dbQuery` | Executes read-only SQL queries with parameterized inputs |
 | `dbExecute` | Performs data modification operations (INSERT, UPDATE, DELETE) |
 | `dbTransaction` | Manages SQL transactions with commit and rollback support |
+| `dbSchema` | Auto-discovers database structure and relationships with support for tables, columns, and relationships |
 
 ### Database Schema Explorer Tool
 
@@ -270,7 +271,7 @@ The server includes support for editor-specific features through the `editor/con
 We're committed to expanding DB MCP Server's capabilities. Here's our planned development roadmap:
 
 ### Q2 2025
-- **Schema Explorer** - Auto-discover database structure and relationships
+- ✅ **Schema Explorer** - Auto-discover database structure and relationships
 - **Query Builder** - Visual SQL query construction with syntax validation
 - **Performance Analyzer** - Identify slow queries and optimization opportunities
 
