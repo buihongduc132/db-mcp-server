@@ -3,6 +3,7 @@ package dbtools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
@@ -90,6 +91,57 @@ func handleExecute(ctx context.Context, params map[string]interface{}) (interfac
 	}
 
 	// Return results
+	return map[string]interface{}{
+		"rowsAffected": rowsAffected,
+		"lastInsertId": lastInsertID,
+		"statement":    statement,
+		"params":       statementParams,
+	}, nil
+}
+
+// createMockExecuteTool creates a mock version of the execute tool that works without database connection
+func createMockExecuteTool() *tools.Tool {
+	// Create the tool using the same schema as the real execute tool
+	tool := createExecuteTool()
+	
+	// Replace the handler with mock implementation
+	tool.Handler = handleMockExecute
+	
+	return tool
+}
+
+// handleMockExecute is a mock implementation of the execute handler
+func handleMockExecute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	// Extract parameters
+	statement, ok := getStringParam(params, "statement")
+	if !ok {
+		return nil, fmt.Errorf("statement parameter is required")
+	}
+
+	// Extract statement parameters if provided
+	var statementParams []interface{}
+	if paramsArray, ok := getArrayParam(params, "params"); ok {
+		statementParams = paramsArray
+	}
+
+	// Simulate results based on statement
+	var rowsAffected int64 = 1
+	var lastInsertID int64 = -1
+	
+	// Simple pattern matching to provide realistic mock results
+	if strings.Contains(strings.ToUpper(statement), "INSERT") {
+		// For INSERT statements, generate a mock last insert ID
+		lastInsertID = time.Now().Unix() % 1000 // Generate a pseudo-random ID based on current time
+		rowsAffected = 1
+	} else if strings.Contains(strings.ToUpper(statement), "UPDATE") {
+		// For UPDATE statements, simulate affecting 1-3 rows
+		rowsAffected = int64(1 + (time.Now().Unix() % 3))
+	} else if strings.Contains(strings.ToUpper(statement), "DELETE") {
+		// For DELETE statements, simulate affecting 0-2 rows
+		rowsAffected = int64(time.Now().Unix() % 3)
+	}
+
+	// Return results in the same format as the real execute tool
 	return map[string]interface{}{
 		"rowsAffected": rowsAffected,
 		"lastInsertId": lastInsertID,

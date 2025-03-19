@@ -26,7 +26,7 @@ func main() {
 
 	// Parse command line flags
 	transportMode := flag.String("t", "", "Transport mode (sse or stdio)")
-	port := flag.Int("port", 0, "Server port")
+	port := flag.Int("port", 9092, "Server port")
 	flag.Parse()
 
 	// Load configuration
@@ -36,9 +36,7 @@ func main() {
 	if *transportMode != "" {
 		cfg.TransportMode = *transportMode
 	}
-	if *port != 0 {
-		cfg.ServerPort = *port
-	}
+	cfg.ServerPort = *port
 
 	// Initialize logger
 	logger.Initialize(cfg.LogLevel)
@@ -154,11 +152,11 @@ func registerDatabaseTools(toolRegistry *tools.Registry) {
 	err := dbtools.InitDatabase(cfg)
 	if err != nil {
 		logger.Error("Failed to initialize database: %v", err)
-		logger.Warn("Using mock schema explorer tool only")
+		logger.Warn("Using mock database tools")
 		
-		// Register just the schema explorer tool with mock data
-		dbtools.RegisterSchemaExplorerTool(toolRegistry)
-		logger.Info("Mock schema explorer tool registered successfully")
+		// Register all tools with mock implementations
+		dbtools.RegisterMockDatabaseTools(toolRegistry)
+		logger.Info("Mock database tools registered successfully")
 		return
 	}
 

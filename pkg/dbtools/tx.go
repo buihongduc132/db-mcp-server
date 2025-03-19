@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
@@ -280,4 +281,181 @@ func isQueryStatement(statement string) bool {
 	// Simple heuristic: if the statement starts with SELECT, it's a query
 	// This is a simplification; a real implementation would use a proper SQL parser
 	return len(statement) >= 6 && statement[0:6] == "SELECT"
+}
+
+// createMockTransactionTool creates a mock version of the transaction tool that works without database connection
+func createMockTransactionTool() *tools.Tool {
+	// Create the tool using the same schema as the real transaction tool
+	tool := createTransactionTool()
+	
+	// Replace the handler with mock implementation
+	tool.Handler = handleMockTransaction
+	
+	return tool
+}
+
+// Mock transaction state storage (in-memory)
+var mockActiveTransactions = make(map[string]bool)
+
+// handleMockTransaction is a mock implementation of the transaction handler
+func handleMockTransaction(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	// Extract action parameter
+	action, ok := getStringParam(params, "action")
+	if !ok {
+		return nil, fmt.Errorf("action parameter is required")
+	}
+
+	// Validate action
+	validActions := map[string]bool{"begin": true, "commit": true, "rollback": true, "execute": true}
+	if !validActions[action] {
+		return nil, fmt.Errorf("invalid action: %s", action)
+	}
+
+	// Handle different actions
+	switch action {
+	case "begin":
+		return handleMockBeginTransaction(params)
+	case "commit":
+		return handleMockCommitTransaction(params)
+	case "rollback":
+		return handleMockRollbackTransaction(params)
+	case "execute":
+		return handleMockExecuteTransaction(params)
+	default:
+		return nil, fmt.Errorf("unsupported action: %s", action)
+	}
+}
+
+// handleMockBeginTransaction handles the mock begin transaction action
+func handleMockBeginTransaction(params map[string]interface{}) (interface{}, error) {
+	// Extract read-only parameter (optional)
+	readOnly, _ := params["readOnly"].(bool)
+
+	// Generate a transaction ID
+	txID := fmt.Sprintf("mock-tx-%d", time.Now().UnixNano())
+	
+	// Store in mock transaction state
+	mockActiveTransactions[txID] = true
+
+	// Return transaction info
+	return map[string]interface{}{
+		"transactionId": txID,
+		"readOnly":      readOnly,
+		"status":        "active",
+	}, nil
+}
+
+// handleMockCommitTransaction handles the mock commit transaction action
+func handleMockCommitTransaction(params map[string]interface{}) (interface{}, error) {
+	// Extract transaction ID
+	txID, ok := getStringParam(params, "transactionId")
+	if !ok {
+		return nil, fmt.Errorf("transactionId parameter is required")
+	}
+
+	// Verify transaction exists
+	if !mockActiveTransactions[txID] {
+		return nil, fmt.Errorf("transaction not found: %s", txID)
+	}
+
+	// Remove from active transactions
+	delete(mockActiveTransactions, txID)
+
+	// Return success
+	return map[string]interface{}{
+		"transactionId": txID,
+		"status":        "committed",
+	}, nil
+}
+
+// handleMockRollbackTransaction handles the mock rollback transaction action
+func handleMockRollbackTransaction(params map[string]interface{}) (interface{}, error) {
+	// Extract transaction ID
+	txID, ok := getStringParam(params, "transactionId")
+	if !ok {
+		return nil, fmt.Errorf("transactionId parameter is required")
+	}
+
+	// Verify transaction exists
+	if !mockActiveTransactions[txID] {
+		return nil, fmt.Errorf("transaction not found: %s", txID)
+	}
+
+	// Remove from active transactions
+	delete(mockActiveTransactions, txID)
+
+	// Return success
+	return map[string]interface{}{
+		"transactionId": txID,
+		"status":        "rolled back",
+	}, nil
+}
+
+// handleMockExecuteTransaction handles the mock execute in transaction action
+func handleMockExecuteTransaction(params map[string]interface{}) (interface{}, error) {
+	// Extract transaction ID
+	txID, ok := getStringParam(params, "transactionId")
+	if !ok {
+		return nil, fmt.Errorf("transactionId parameter is required")
+	}
+
+	// Verify transaction exists
+	if !mockActiveTransactions[txID] {
+		return nil, fmt.Errorf("transaction not found: %s", txID)
+	}
+
+	// Extract statement
+	statement, ok := getStringParam(params, "statement")
+	if !ok {
+		return nil, fmt.Errorf("statement parameter is required")
+	}
+
+	// Extract statement parameters if provided
+	var statementParams []interface{}
+	if paramsArray, ok := getArrayParam(params, "params"); ok {
+		statementParams = paramsArray
+	}
+
+	// Determine if this is a query or not (SELECT = query, otherwise execute)
+	isQuery := strings.HasPrefix(strings.ToUpper(strings.TrimSpace(statement)), "SELECT")
+	
+	var result map[string]interface{}
+	
+	if isQuery {
+		// Generate mock query results
+		mockRows := []map[string]interface{}{
+			{"column1": "mock value 1", "column2": 42},
+			{"column1": "mock value 2", "column2": 84},
+		}
+		
+		result = map[string]interface{}{
+			"rows":  mockRows,
+			"count": len(mockRows),
+		}
+	} else {
+		// Generate mock execute results
+		var rowsAffected int64 = 1
+		var lastInsertID int64 = -1
+		
+		if strings.Contains(strings.ToUpper(statement), "INSERT") {
+			lastInsertID = time.Now().Unix() % 1000
+		} else if strings.Contains(strings.ToUpper(statement), "UPDATE") {
+			rowsAffected = int64(1 + (time.Now().Unix() % 3))
+		} else if strings.Contains(strings.ToUpper(statement), "DELETE") {
+			rowsAffected = int64(time.Now().Unix() % 3)
+		}
+		
+		result = map[string]interface{}{
+			"rowsAffected": rowsAffected,
+			"lastInsertId": lastInsertID,
+		}
+	}
+
+	// Return results
+	return map[string]interface{}{
+		"transactionId": txID,
+		"statement":     statement,
+		"params":        statementParams,
+		"result":        result,
+	}, nil
 }
