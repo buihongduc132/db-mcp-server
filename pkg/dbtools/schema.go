@@ -236,7 +236,7 @@ func getColumns(ctx context.Context, table string) (interface{}, error) {
 				COLUMN_NAME as name,
 				COLUMN_TYPE as type,
 				IS_NULLABLE as nullable,
-				COLUMN_KEY as key,
+				COLUMN_KEY as ` + "`key`" + `,
 				EXTRA as extra,
 				COLUMN_DEFAULT as default_value,
 				CHARACTER_MAXIMUM_LENGTH as max_length,
@@ -282,7 +282,7 @@ func getColumns(ctx context.Context, table string) (interface{}, error) {
 						AND ccu.column_name = c.column_name
 					) THEN 'MUL'
 					ELSE ''
-				END as key,
+				END as "key",
 				'' as extra,
 				column_default as default_value,
 				character_maximum_length as max_length,
