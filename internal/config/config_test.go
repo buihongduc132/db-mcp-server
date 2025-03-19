@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,7 +23,39 @@ func TestGetEnv(t *testing.T) {
 }
 
 func TestLoadConfig(t *testing.T) {
-	// Test with default values
+	// Clear any environment variables that might affect the test
+	os.Unsetenv("SERVER_PORT")
+	os.Unsetenv("TRANSPORT_MODE")
+	os.Unsetenv("LOG_LEVEL")
+	os.Unsetenv("DB_TYPE")
+	os.Unsetenv("DB_HOST")
+	os.Unsetenv("DB_PORT")
+	os.Unsetenv("DB_USER")
+	os.Unsetenv("DB_PASSWORD")
+	os.Unsetenv("DB_NAME")
+	
+	// Get current working directory and handle .env file
+	cwd, _ := os.Getwd()
+	envPath := filepath.Join(cwd, ".env")
+	tempPath := filepath.Join(cwd, ".env.bak")
+	
+	// Save existing .env if it exists
+	envExists := false
+	if _, err := os.Stat(envPath); err == nil {
+		envExists = true
+		err = os.Rename(envPath, tempPath)
+		if err != nil {
+			t.Fatalf("Failed to rename .env file: %v", err)
+		}
+		// Restore at the end
+		defer func() {
+			if envExists {
+				os.Rename(tempPath, envPath)
+			}
+		}()
+	}
+	
+	// Test with default values (no .env file and no environment variables)
 	config := LoadConfig()
 	assert.Equal(t, 9090, config.ServerPort)
 	assert.Equal(t, "sse", config.TransportMode)
