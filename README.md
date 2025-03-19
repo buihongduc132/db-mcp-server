@@ -208,6 +208,8 @@ The server currently includes three core database tools:
 | `dbQuery` | Executes read-only SQL queries with parameterized inputs |
 | `dbExecute` | Performs data modification operations (INSERT, UPDATE, DELETE) |
 | `dbTransaction` | Manages SQL transactions with commit and rollback support |
+| `dbSchema` | Rapid database exploration without writing SQL queries |
+
 
 ### Editor Integration
 
