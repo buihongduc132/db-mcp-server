@@ -85,6 +85,31 @@ func RegisterDatabaseTools(registry *tools.Registry) {
 
 	// Register transaction tool
 	registry.RegisterTool(createTransactionTool())
+	
+	// Register schema explorer tool
+	registry.RegisterTool(createSchemaExplorerTool())
+}
+
+// RegisterSchemaExplorerTool registers only the schema explorer tool
+// This is useful when database connection fails but we still want to provide schema exploration
+func RegisterSchemaExplorerTool(registry *tools.Registry) {
+	registry.RegisterTool(createSchemaExplorerTool())
+}
+
+// RegisterMockDatabaseTools registers all database tools with mock implementations
+// This is used when database connection fails but we still want to provide all database tools
+func RegisterMockDatabaseTools(registry *tools.Registry) {
+	// Register mock query tool
+	registry.RegisterTool(createMockQueryTool())
+	
+	// Register mock execute tool
+	registry.RegisterTool(createMockExecuteTool())
+	
+	// Register mock transaction tool
+	registry.RegisterTool(createMockTransactionTool())
+	
+	// Register schema explorer tool (already uses mock data)
+	registry.RegisterTool(createSchemaExplorerTool())
 }
 
 // Helper function to convert rows to a slice of maps
