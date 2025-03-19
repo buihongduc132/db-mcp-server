@@ -143,11 +143,6 @@ func registerDatabaseTools(toolRegistry *tools.Registry) {
 	// Initialize database connection
 	cfg := config.LoadConfig()
 	
-	// Override with hard-coded values for testing
-	cfg.DBConfig.User = "root"
-	cfg.DBConfig.Password = ""
-	cfg.DBConfig.Name = "mysql"
-	
 	// Try to initialize database
 	err := dbtools.InitDatabase(cfg)
 	if err != nil {
