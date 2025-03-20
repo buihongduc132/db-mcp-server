@@ -67,9 +67,7 @@ func handleExecute(ctx context.Context, params map[string]interface{}) (interfac
 	var statementParams []interface{}
 	if paramsArray, ok := getArrayParam(params, "params"); ok {
 		statementParams = make([]interface{}, len(paramsArray))
-		for i, param := range paramsArray {
-			statementParams[i] = param
-		}
+		copy(statementParams, paramsArray)
 	}
 
 	// Execute statement
@@ -103,10 +101,10 @@ func handleExecute(ctx context.Context, params map[string]interface{}) (interfac
 func createMockExecuteTool() *tools.Tool {
 	// Create the tool using the same schema as the real execute tool
 	tool := createExecuteTool()
-	
+
 	// Replace the handler with mock implementation
 	tool.Handler = handleMockExecute
-	
+
 	return tool
 }
 
@@ -127,7 +125,7 @@ func handleMockExecute(ctx context.Context, params map[string]interface{}) (inte
 	// Simulate results based on statement
 	var rowsAffected int64 = 1
 	var lastInsertID int64 = -1
-	
+
 	// Simple pattern matching to provide realistic mock results
 	if strings.Contains(strings.ToUpper(statement), "INSERT") {
 		// For INSERT statements, generate a mock last insert ID

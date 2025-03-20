@@ -371,12 +371,16 @@ func (t *SSETransport) sendErrorResponse(w http.ResponseWriter, id interface{}, 
 	if id == nil || w.Header().Get(headerContentType) == "" {
 		w.Header().Set(headerContentType, "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(responseJSON)
+		if _, err := w.Write(responseJSON); err != nil {
+			logger.Error("Failed to write error response: %v", err)
+		}
 	} else {
 		// For session-related errors, we'll rely on the direct HTTP response
 		// since we don't have access to the session here
 		w.Header().Set(headerContentType, "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(responseJSON)
+		if _, err := w.Write(responseJSON); err != nil {
+			logger.Error("Failed to write error response: %v", err)
+		}
 	}
 }

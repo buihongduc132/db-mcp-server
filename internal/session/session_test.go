@@ -9,43 +9,53 @@ import (
 )
 
 // mockResponseWriter is a mock implementation of http.ResponseWriter for testing
+//
+//nolint:unused // These are test helpers that might be used in future tests
 type mockResponseWriter struct {
 	headers     http.Header
 	writtenData []byte
 	statusCode  int
 }
 
+//nolint:unused // Test helper function
 func newMockResponseWriter() *mockResponseWriter {
 	return &mockResponseWriter{
 		headers: make(http.Header),
 	}
 }
 
+//nolint:unused // Test helper method
 func (m *mockResponseWriter) Header() http.Header {
 	return m.headers
 }
 
+//nolint:unused // Test helper method
 func (m *mockResponseWriter) Write(data []byte) (int, error) {
 	m.writtenData = append(m.writtenData, data...)
 	return len(data), nil
 }
 
+//nolint:unused // Test helper method
 func (m *mockResponseWriter) WriteHeader(statusCode int) {
 	m.statusCode = statusCode
 }
 
 // mockFlusher is a mock implementation of http.Flusher for testing
+//
+//nolint:unused // These are test helpers that might be used in future tests
 type mockFlusher struct {
 	*mockResponseWriter
 	flushed bool
 }
 
+//nolint:unused // Test helper function
 func newMockFlusher() *mockFlusher {
 	return &mockFlusher{
 		mockResponseWriter: newMockResponseWriter(),
 	}
 }
 
+//nolint:unused // Test helper method
 func (m *mockFlusher) Flush() {
 	m.flushed = true
 }

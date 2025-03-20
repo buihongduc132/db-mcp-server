@@ -33,12 +33,12 @@ func TestLoadConfig(t *testing.T) {
 	os.Unsetenv("DB_USER")
 	os.Unsetenv("DB_PASSWORD")
 	os.Unsetenv("DB_NAME")
-	
+
 	// Get current working directory and handle .env file
 	cwd, _ := os.Getwd()
 	envPath := filepath.Join(cwd, ".env")
 	tempPath := filepath.Join(cwd, ".env.bak")
-	
+
 	// Save existing .env if it exists
 	envExists := false
 	if _, err := os.Stat(envPath); err == nil {
@@ -50,11 +50,13 @@ func TestLoadConfig(t *testing.T) {
 		// Restore at the end
 		defer func() {
 			if envExists {
-				os.Rename(tempPath, envPath)
+				if err := os.Rename(tempPath, envPath); err != nil {
+					t.Logf("Failed to restore .env file: %v", err)
+				}
 			}
 		}()
 	}
-	
+
 	// Test with default values (no .env file and no environment variables)
 	config := LoadConfig()
 	assert.Equal(t, 9090, config.ServerPort)

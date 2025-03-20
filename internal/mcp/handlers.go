@@ -475,7 +475,9 @@ func (h *Handler) ExecuteTool(req *jsonrpc.Request, sess *session.Session) (inte
 				notificationJSON, _ := json.Marshal(progressNotification)
 
 				// Send directly as a message event
-				sess.SendEvent("message", notificationJSON)
+				if err := sess.SendEvent("message", notificationJSON); err != nil {
+					logger.Error("Failed to send progress event: %v", err)
+				}
 			}
 		}()
 	}

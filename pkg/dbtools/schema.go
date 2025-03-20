@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/FreePeak/db-mcp-server/pkg/tools"
 	"github.com/FreePeak/db-mcp-server/pkg/db"
+	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
 // createSchemaExplorerTool creates a tool for exploring database schema
@@ -63,32 +63,32 @@ func handleSchemaExplorer(ctx context.Context, params map[string]interface{}) (i
 	// Force use of actual database and don't fall back to mock data
 	log.Printf("dbSchema: Using component=%s, table=%s", component, table)
 	log.Printf("dbSchema: DB instance nil? %v", dbInstance == nil)
-	
-	// Print database configuration 
+
+	// Print database configuration
 	if dbConfig != nil {
 		log.Printf("dbSchema: DB Config - Type: %s, Host: %s, Port: %d, User: %s, Name: %s",
 			dbConfig.Type, dbConfig.Host, dbConfig.Port, dbConfig.User, dbConfig.Name)
 	} else {
 		log.Printf("dbSchema: DB Config is nil")
 	}
-	
+
 	if dbInstance == nil {
 		log.Printf("dbSchema: Database connection not initialized, attempting to create one")
 		// Try to initialize database if not already done
 		if dbConfig == nil {
 			return nil, fmt.Errorf("database not initialized: both dbInstance and dbConfig are nil")
 		}
-		
+
 		// Connect to the database
 		database, err := db.NewDatabase(*dbConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create database instance: %w", err)
 		}
-		
+
 		if err := database.Connect(); err != nil {
 			return nil, fmt.Errorf("failed to connect to database: %w", err)
 		}
-		
+
 		dbInstance = database
 		log.Printf("dbSchema: Connected to %s database at %s:%d/%s",
 			dbConfig.Type, dbConfig.Host, dbConfig.Port, dbConfig.Name)
@@ -116,9 +116,9 @@ func handleSchemaExplorer(ctx context.Context, params map[string]interface{}) (i
 func getTables(ctx context.Context) (interface{}, error) {
 	var query string
 	var args []interface{}
-	
+
 	log.Printf("dbSchema getTables: Database type: %s", dbConfig.Type)
-	
+
 	// Query depends on database type
 	switch dbConfig.Type {
 	case string(MySQL):
@@ -139,7 +139,7 @@ func getTables(ctx context.Context) (interface{}, error) {
 		`
 		args = []interface{}{dbConfig.Name}
 		log.Printf("dbSchema getTables: Using MySQL query with schema: %s", dbConfig.Name)
-		
+
 	case string(Postgres):
 		query = `
 			SELECT 
@@ -157,12 +157,12 @@ func getTables(ctx context.Context) (interface{}, error) {
 				table_name
 		`
 		log.Printf("dbSchema getTables: Using PostgreSQL query")
-		
+
 	default:
 		// Fallback to a simple SHOW TABLES query
 		log.Printf("dbSchema getTables: Using fallback SHOW TABLES query for unknown DB type: %s", dbConfig.Type)
 		query = "SHOW TABLES"
-		
+
 		// Get the results
 		rows, err := dbInstance.Query(ctx, query)
 		if err != nil {
@@ -170,28 +170,28 @@ func getTables(ctx context.Context) (interface{}, error) {
 			return nil, fmt.Errorf("failed to query tables: %w", err)
 		}
 		defer rows.Close()
-		
+
 		// Convert to a list of tables
 		var tables []map[string]interface{}
 		var tableName string
-		
+
 		for rows.Next() {
 			if err := rows.Scan(&tableName); err != nil {
 				log.Printf("dbSchema getTables: Failed to scan row: %v", err)
 				continue
 			}
-			
+
 			tables = append(tables, map[string]interface{}{
 				"name": tableName,
 				"type": "BASE TABLE", // Default type
 			})
 		}
-		
+
 		if err := rows.Err(); err != nil {
 			log.Printf("dbSchema getTables: Error during rows iteration: %v", err)
 			return nil, fmt.Errorf("error iterating through tables: %w", err)
 		}
-		
+
 		log.Printf("dbSchema getTables: Found %d tables using SHOW TABLES", len(tables))
 		return map[string]interface{}{
 			"tables": tables,
@@ -199,7 +199,7 @@ func getTables(ctx context.Context) (interface{}, error) {
 			"type":   dbConfig.Type,
 		}, nil
 	}
-	
+
 	// Execute query
 	log.Printf("dbSchema getTables: Executing query: %s with args: %v", query, args)
 	rows, err := dbInstance.Query(ctx, query, args...)
@@ -208,14 +208,14 @@ func getTables(ctx context.Context) (interface{}, error) {
 		return nil, fmt.Errorf("failed to query tables: %w", err)
 	}
 	defer rows.Close()
-	
+
 	// Convert rows to map
 	tables, err := rowsToMaps(rows)
 	if err != nil {
 		log.Printf("dbSchema getTables: Failed to process rows: %v", err)
 		return nil, fmt.Errorf("failed to process query results: %w", err)
 	}
-	
+
 	log.Printf("dbSchema getTables: Found %d tables", len(tables))
 	return map[string]interface{}{
 		"tables": tables,
@@ -227,7 +227,7 @@ func getTables(ctx context.Context) (interface{}, error) {
 // getColumns returns the columns for a specific table from the actual database
 func getColumns(ctx context.Context, table string) (interface{}, error) {
 	var query string
-	
+
 	// Query depends on database type
 	switch dbConfig.Type {
 	case string(MySQL):
@@ -299,27 +299,27 @@ func getColumns(ctx context.Context, table string) (interface{}, error) {
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", dbConfig.Type)
 	}
-	
+
 	var args []interface{}
 	if dbConfig.Type == string(MySQL) {
 		args = []interface{}{dbConfig.Name, table}
 	} else {
 		args = []interface{}{table}
 	}
-	
+
 	// Execute query
 	rows, err := dbInstance.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query columns for table %s: %w", table, err)
 	}
 	defer rows.Close()
-	
+
 	// Convert rows to map
 	columns, err := rowsToMaps(rows)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process query results: %w", err)
 	}
-	
+
 	return map[string]interface{}{
 		"table":   table,
 		"columns": columns,
@@ -332,7 +332,7 @@ func getColumns(ctx context.Context, table string) (interface{}, error) {
 func getRelationships(ctx context.Context, table string) (interface{}, error) {
 	var query string
 	var args []interface{}
-	
+
 	// Query depends on database type
 	switch dbConfig.Type {
 	case string(MySQL):
@@ -355,14 +355,14 @@ func getRelationships(ctx context.Context, table string) (interface{}, error) {
 				kcu.TABLE_SCHEMA = ?
 				AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
 		`
-		
+
 		args = []interface{}{dbConfig.Name}
 		// If table is specified, add it to WHERE clause
 		if table != "" {
 			query += " AND (kcu.TABLE_NAME = ? OR kcu.REFERENCED_TABLE_NAME = ?)"
 			args = append(args, table, table)
 		}
-		
+
 	case string(Postgres):
 		query = `
 			SELECT
@@ -385,30 +385,30 @@ func getRelationships(ctx context.Context, table string) (interface{}, error) {
 				tc.constraint_type = 'FOREIGN KEY'
 				AND tc.table_schema = 'public'
 		`
-		
+
 		// If table is specified, add it to WHERE clause
 		if table != "" {
 			query += " AND (tc.table_name = ? OR ccu.table_name = ?)"
 			args = append(args, table, table)
 		}
-		
+
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", dbConfig.Type)
 	}
-	
+
 	// Execute query
 	rows, err := dbInstance.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query relationships: %w", err)
 	}
 	defer rows.Close()
-	
+
 	// Convert rows to map
 	relationships, err := rowsToMaps(rows)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process query results: %w", err)
 	}
-	
+
 	return map[string]interface{}{
 		"relationships": relationships,
 		"count":         len(relationships),
@@ -424,19 +424,19 @@ func getFullSchema(ctx context.Context) (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tables: %w", err)
 	}
-	
+
 	// Get relationships
 	relationshipsResult, err := getRelationships(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get relationships: %w", err)
 	}
-	
+
 	// Extract tables
 	tables, ok := tablesResult.(map[string]interface{})["tables"].([]map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("invalid table result format")
 	}
-	
+
 	// For each table, get its columns
 	var tablesWithColumns []map[string]interface{}
 	for _, table := range tables {
@@ -444,7 +444,7 @@ func getFullSchema(ctx context.Context) (interface{}, error) {
 		if !ok {
 			continue
 		}
-		
+
 		columnsResult, err := getColumns(ctx, tableName)
 		if err != nil {
 			// Log error but continue
@@ -458,10 +458,10 @@ func getFullSchema(ctx context.Context) (interface{}, error) {
 				table["columns"] = []map[string]interface{}{}
 			}
 		}
-		
+
 		tablesWithColumns = append(tablesWithColumns, table)
 	}
-	
+
 	return map[string]interface{}{
 		"tables":        tablesWithColumns,
 		"relationships": relationshipsResult.(map[string]interface{})["relationships"],
@@ -470,31 +470,33 @@ func getFullSchema(ctx context.Context) (interface{}, error) {
 }
 
 // getMockTables returns mock table data
+//
+//nolint:unused // Mock function for testing/development
 func getMockTables() (interface{}, error) {
 	tables := []map[string]interface{}{
 		{
-			"name":               "users",
-			"type":               "BASE TABLE",
-			"engine":             "InnoDB",
+			"name":                "users",
+			"type":                "BASE TABLE",
+			"engine":              "InnoDB",
 			"estimated_row_count": 1500,
-			"create_time":        time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"update_time":        time.Now().Add(-2 * 24 * time.Hour).Format(time.RFC3339),
+			"create_time":         time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339),
+			"update_time":         time.Now().Add(-2 * 24 * time.Hour).Format(time.RFC3339),
 		},
 		{
-			"name":               "orders",
-			"type":               "BASE TABLE",
-			"engine":             "InnoDB",
+			"name":                "orders",
+			"type":                "BASE TABLE",
+			"engine":              "InnoDB",
 			"estimated_row_count": 8750,
-			"create_time":        time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"update_time":        time.Now().Add(-1 * 24 * time.Hour).Format(time.RFC3339),
+			"create_time":         time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339),
+			"update_time":         time.Now().Add(-1 * 24 * time.Hour).Format(time.RFC3339),
 		},
 		{
-			"name":               "products",
-			"type":               "BASE TABLE",
-			"engine":             "InnoDB",
+			"name":                "products",
+			"type":                "BASE TABLE",
+			"engine":              "InnoDB",
 			"estimated_row_count": 350,
-			"create_time":        time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"update_time":        time.Now().Add(-5 * 24 * time.Hour).Format(time.RFC3339),
+			"create_time":         time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339),
+			"update_time":         time.Now().Add(-5 * 24 * time.Hour).Format(time.RFC3339),
 		},
 	}
 
@@ -505,7 +507,9 @@ func getMockTables() (interface{}, error) {
 	}, nil
 }
 
-// getMockColumns returns mock column data for a table
+// getMockColumns returns mock column data for a given table
+//
+//nolint:unused // Mock function for testing/development
 func getMockColumns(table string) (interface{}, error) {
 	var columns []map[string]interface{}
 
@@ -687,7 +691,9 @@ func getMockColumns(table string) (interface{}, error) {
 	}, nil
 }
 
-// getMockRelationships returns mock relationship data
+// getMockRelationships returns mock relationship data for a given table
+//
+//nolint:unused // Mock function for testing/development
 func getMockRelationships(table string) (interface{}, error) {
 	relationships := []map[string]interface{}{
 		{
@@ -738,24 +744,26 @@ func getMockRelationships(table string) (interface{}, error) {
 	}, nil
 }
 
-// getMockFullSchema returns a mock full schema
+// getMockFullSchema returns a mock complete database schema
+//
+//nolint:unused // Mock function for testing/development
 func getMockFullSchema() (interface{}, error) {
 	tablesResult, _ := getMockTables()
 	relationshipsResult, _ := getMockRelationships("")
-	
+
 	tables := tablesResult.(map[string]interface{})["tables"].([]map[string]interface{})
 	tableDetails := make(map[string]interface{})
-	
+
 	for _, tableInfo := range tables {
 		tableName := tableInfo["name"].(string)
 		columnsResult, _ := getMockColumns(tableName)
 		tableDetails[tableName] = columnsResult.(map[string]interface{})["columns"]
 	}
-	
+
 	return map[string]interface{}{
 		"tables":        tablesResult.(map[string]interface{})["tables"],
 		"relationships": relationshipsResult.(map[string]interface{})["relationships"],
 		"tableDetails":  tableDetails,
 		"type":          "mysql",
 	}, nil
-} 
+}

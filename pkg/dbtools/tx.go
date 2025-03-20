@@ -214,9 +214,7 @@ func executeInTransaction(ctx context.Context, params map[string]interface{}) (i
 	var statementParams []interface{}
 	if paramsArray, ok := getArrayParam(params, "params"); ok {
 		statementParams = make([]interface{}, len(paramsArray))
-		for i, param := range paramsArray {
-			statementParams[i] = param
-		}
+		copy(statementParams, paramsArray)
 	}
 
 	// Check if statement is a query or an execute statement
@@ -287,10 +285,10 @@ func isQueryStatement(statement string) bool {
 func createMockTransactionTool() *tools.Tool {
 	// Create the tool using the same schema as the real transaction tool
 	tool := createTransactionTool()
-	
+
 	// Replace the handler with mock implementation
 	tool.Handler = handleMockTransaction
-	
+
 	return tool
 }
 
@@ -333,7 +331,7 @@ func handleMockBeginTransaction(params map[string]interface{}) (interface{}, err
 
 	// Generate a transaction ID
 	txID := fmt.Sprintf("mock-tx-%d", time.Now().UnixNano())
-	
+
 	// Store in mock transaction state
 	mockActiveTransactions[txID] = true
 
@@ -418,16 +416,16 @@ func handleMockExecuteTransaction(params map[string]interface{}) (interface{}, e
 
 	// Determine if this is a query or not (SELECT = query, otherwise execute)
 	isQuery := strings.HasPrefix(strings.ToUpper(strings.TrimSpace(statement)), "SELECT")
-	
+
 	var result map[string]interface{}
-	
+
 	if isQuery {
 		// Generate mock query results
 		mockRows := []map[string]interface{}{
 			{"column1": "mock value 1", "column2": 42},
 			{"column1": "mock value 2", "column2": 84},
 		}
-		
+
 		result = map[string]interface{}{
 			"rows":  mockRows,
 			"count": len(mockRows),
@@ -436,7 +434,7 @@ func handleMockExecuteTransaction(params map[string]interface{}) (interface{}, e
 		// Generate mock execute results
 		var rowsAffected int64 = 1
 		var lastInsertID int64 = -1
-		
+
 		if strings.Contains(strings.ToUpper(statement), "INSERT") {
 			lastInsertID = time.Now().Unix() % 1000
 		} else if strings.Contains(strings.ToUpper(statement), "UPDATE") {
@@ -444,7 +442,7 @@ func handleMockExecuteTransaction(params map[string]interface{}) (interface{}, e
 		} else if strings.Contains(strings.ToUpper(statement), "DELETE") {
 			rowsAffected = int64(time.Now().Unix() % 3)
 		}
-		
+
 		result = map[string]interface{}{
 			"rowsAffected": rowsAffected,
 			"lastInsertId": lastInsertID,

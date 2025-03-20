@@ -67,9 +67,7 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 	var queryParams []interface{}
 	if paramsArray, ok := getArrayParam(params, "params"); ok {
 		queryParams = make([]interface{}, len(paramsArray))
-		for i, param := range paramsArray {
-			queryParams[i] = param
-		}
+		copy(queryParams, paramsArray)
 	}
 
 	// Execute query
@@ -98,10 +96,10 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 func createMockQueryTool() *tools.Tool {
 	// Create the tool using the same schema as the real query tool
 	tool := createQueryTool()
-	
+
 	// Replace the handler with mock implementation
 	tool.Handler = handleMockQuery
-	
+
 	return tool
 }
 
@@ -115,7 +113,7 @@ func handleMockQuery(ctx context.Context, params map[string]interface{}) (interf
 
 	// Return mock data based on query
 	var mockRows []map[string]interface{}
-	
+
 	// Simple pattern matching to generate relevant mock data
 	if containsIgnoreCase(query, "user") {
 		mockRows = []map[string]interface{}{
