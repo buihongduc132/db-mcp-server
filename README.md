@@ -1,13 +1,13 @@
 <div align="center">
 
-# DB MCP Server
+# Multi DB MCP Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Go Report Card](https://goreportcard.com/badge/github.com/FreePeak/db-mcp-server)](https://goreportcard.com/report/github.com/FreePeak/db-mcp-server)
 [![Go Reference](https://pkg.go.dev/badge/github.com/FreePeak/db-mcp-server.svg)](https://pkg.go.dev/github.com/FreePeak/db-mcp-server)
 [![Contributors](https://img.shields.io/github/contributors/FreePeak/db-mcp-server)](https://github.com/FreePeak/db-mcp-server/graphs/contributors)
 
-<h3>A robust implementation of the Database Model Context Protocol (DB MCP)</h3>
+<h3>A robust multi-database implementation of the Database Model Context Protocol (DB MCP)</h3>
 
 [Features](#key-features) • [Installation](#installation) • [Usage](#usage) • [Documentation](#documentation) • [Contributing](#contributing) • [License](#license)
 
@@ -17,10 +17,11 @@
 
 ## 📋 Overview
 
-The DB MCP Server is a high-performance, feature-rich implementation of the Database Model Context Protocol designed to enable seamless integration between database operations and client applications like VS Code and Cursor. It provides a standardized communication layer allowing clients to discover and invoke database operations through a consistent, well-defined interface, simplifying database access and management across different environments.
+The DB MCP Server is a high-performance, feature-rich implementation of the Database Model Context Protocol designed to enable seamless integration between database operations and client applications like VS Code and Cursor. Currently supporting MySQL and PostgreSQL databases, with plans to expand to most widely used databases including NoSQL solutions, it provides a standardized communication layer allowing clients to discover and invoke database operations through a consistent, well-defined interface, simplifying database access and management across different environments.
 
 ## ✨ Key Features
 
+- **Multi-Database Support**: Currently supports MySQL and PostgreSQL with plans for expansion
 - **Flexible Transport**: Server-Sent Events (SSE) transport layer with robust connection handling
 - **Standard Messaging**: JSON-RPC based message format for interoperability
 - **Dynamic Tool Registry**: Register, discover, and invoke database tools at runtime
@@ -34,7 +35,10 @@ The DB MCP Server is a high-performance, feature-rich implementation of the Data
 ### Prerequisites
 
 - Go 1.18 or later
-- MySQL or PostgreSQL (optional, for persistent sessions)
+- Supported databases:
+  - MySQL
+  - PostgreSQL
+  - (Additional databases in roadmap)
 - Docker (optional, for containerized deployment)
 
 ### Quick Start
@@ -466,14 +470,23 @@ We're committed to expanding DB MCP Server's capabilities. Here's our planned de
 ### Q3 2025
 - **Data Visualization** - Create charts and graphs from query results
 - **Model Generator** - Auto-generate code models from database tables
-- **Multi-DB Support** - Expanded support for NoSQL databases
+- **Multi-DB Support Expansion** - Add support for:
+  - **MongoDB** - Document-oriented NoSQL database
+  - **Redis** - In-memory data structure store
+  - **SQLite** - Lightweight relational database
 
 ### Q4 2025
 - **Migration Manager** - Version-controlled database schema changes
 - **Access Control** - Fine-grained permissions for database operations
 - **Query History** - Track and recall previous queries with execution metrics
+- **Additional Database Integrations**:
+  - **Cassandra** - Distributed NoSQL database
+  - **Elasticsearch** - Search and analytics engine
+  - **DynamoDB** - Managed NoSQL service
+  - **Oracle** - Enterprise database management system
 
 ### Future Vision
+- **Complete Database Coverage** - Support for virtually all widely used databases
 - **AI-Assisted Query Optimization** - Smart recommendations for better performance
 - **Cross-Database Operations** - Unified interface for heterogeneous database environments
 - **Real-Time Collaboration** - Multi-user support for collaborative database work
