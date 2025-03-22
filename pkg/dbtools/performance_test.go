@@ -7,8 +7,14 @@ import (
 )
 
 func TestPerformanceAnalyzer(t *testing.T) {
-	// Create a new performance analyzer
-	analyzer := NewPerformanceAnalyzer()
+	// Get the global performance analyzer and reset it to ensure clean state
+	analyzer := GetPerformanceAnalyzer()
+	analyzer.Reset()
+
+	// Ensure we restore previous state after test
+	defer func() {
+		analyzer.Reset()
+	}()
 
 	// Test tracking a query
 	ctx := context.Background()
@@ -27,6 +33,9 @@ func TestPerformanceAnalyzer(t *testing.T) {
 		t.Errorf("Expected result to be 'test result', got %v", result)
 	}
 
+	// Add a small delay to ensure async metrics update completes
+	time.Sleep(10 * time.Millisecond)
+
 	// Check metrics were collected
 	metrics := analyzer.GetAllMetrics()
 	if len(metrics) == 0 {
@@ -36,7 +45,7 @@ func TestPerformanceAnalyzer(t *testing.T) {
 	// Find the test query in metrics
 	var foundMetrics *QueryMetrics
 	for _, m := range metrics {
-		if m.Query == "SELECT * FROM test_table" {
+		if normalizeQuery(m.Query) == normalizeQuery("SELECT * FROM test_table") {
 			foundMetrics = m
 			break
 		}
