@@ -8,6 +8,7 @@ This package provides tools for interacting with databases in the MCP Server. It
 - Database execute tool for executing non-query statements (INSERT, UPDATE, DELETE)
 - Transaction management tool for executing multiple statements atomically
 - Schema explorer tool for auto-discovering database structure and relationships
+- Performance analyzer tool for identifying slow queries and optimization opportunities
 - Support for both MySQL and PostgreSQL databases
 - Parameterized queries to prevent SQL injection
 - Connection pooling for optimal performance
@@ -252,6 +253,146 @@ Auto-discovers database structure and relationships, including tables, columns, 
 
 **Returns:**
 A comprehensive schema including tables, columns, and relationships in a structured format.
+
+### 5. Database Performance Analyzer Tool (`dbPerformanceAnalyzer`)
+
+Identifies slow queries and provides optimization suggestions for better performance.
+
+**Parameters:**
+- `action` (string, required): Action to perform (getSlowQueries, getMetrics, analyzeQuery, reset, setThreshold)
+- `query` (string): SQL query to analyze (required for analyzeQuery action)
+- `threshold` (integer): Threshold in milliseconds for identifying slow queries (required for setThreshold action)
+- `limit` (integer): Maximum number of results to return (default: 10)
+
+**Example - Get Slow Queries:**
+```json
+{
+  "action": "getSlowQueries",
+  "limit": 5
+}
+```
+
+**Returns:**
+```json
+{
+  "queries": [
+    {
+      "query": "SELECT * FROM orders JOIN order_items ON orders.id = order_items.order_id WHERE orders.status = 'pending'",
+      "count": 15,
+      "avgDuration": "750.25ms",
+      "minDuration": "520.50ms",
+      "maxDuration": "1250.75ms",
+      "totalDuration": "11253.75ms",
+      "lastExecuted": "2023-06-25T14:30:45Z"
+    },
+    {
+      "query": "SELECT * FROM users WHERE last_login > '2023-01-01'",
+      "count": 25,
+      "avgDuration": "650.30ms",
+      "minDuration": "450.20ms",
+      "maxDuration": "980.15ms",
+      "totalDuration": "16257.50ms",
+      "lastExecuted": "2023-06-25T14:15:22Z"
+    }
+  ],
+  "count": 2
+}
+```
+
+**Example - Analyze Query:**
+```json
+{
+  "action": "analyzeQuery",
+  "query": "SELECT * FROM users JOIN orders ON users.id = orders.user_id WHERE orders.total > 100 ORDER BY users.name"
+}
+```
+
+**Returns:**
+```json
+{
+  "query": "SELECT * FROM users JOIN orders ON users.id = orders.user_id WHERE orders.total > 100 ORDER BY users.name",
+  "suggestions": [
+    "Avoid using SELECT * - specify only the columns you need",
+    "Verify that ORDER BY columns are properly indexed"
+  ]
+}
+```
+
+**Example - Set Slow Query Threshold:**
+```json
+{
+  "action": "setThreshold",
+  "threshold": 300
+}
+```
+
+**Returns:**
+```json
+{
+  "success": true,
+  "message": "Slow query threshold updated",
+  "threshold": "300ms"
+}
+```
+
+**Example - Reset Performance Metrics:**
+```json
+{
+  "action": "reset"
+}
+```
+
+**Returns:**
+```json
+{
+  "success": true,
+  "message": "Performance metrics have been reset"
+}
+```
+
+**Example - Get All Query Metrics:**
+```json
+{
+  "action": "getMetrics",
+  "limit": 3
+}
+```
+
+**Returns:**
+```json
+{
+  "queries": [
+    {
+      "query": "SELECT id, name, email FROM users WHERE status = ?",
+      "count": 45,
+      "avgDuration": "12.35ms",
+      "minDuration": "5.20ms",
+      "maxDuration": "28.75ms",
+      "totalDuration": "555.75ms",
+      "lastExecuted": "2023-06-25T14:45:12Z"
+    },
+    {
+      "query": "SELECT * FROM orders WHERE user_id = ? AND created_at > ?",
+      "count": 30,
+      "avgDuration": "25.45ms",
+      "minDuration": "15.30ms",
+      "maxDuration": "45.80ms",
+      "totalDuration": "763.50ms",
+      "lastExecuted": "2023-06-25T14:40:18Z"
+    },
+    {
+      "query": "UPDATE users SET last_login = ? WHERE id = ?",
+      "count": 15,
+      "avgDuration": "18.25ms",
+      "minDuration": "10.50ms",
+      "maxDuration": "35.40ms",
+      "totalDuration": "273.75ms",
+      "lastExecuted": "2023-06-25T14:35:30Z"
+    }
+  ],
+  "count": 3
+}
+```
 
 ## Setup
 

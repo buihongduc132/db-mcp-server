@@ -221,62 +221,77 @@ func executeInTransaction(ctx context.Context, params map[string]interface{}) (i
 	// Check if statement is a query or an execute statement
 	isQuery := isQueryStatement(statement)
 
-	var result interface{}
+	// Get the performance analyzer
+	analyzer := GetPerformanceAnalyzer()
 
-	if isQuery {
-		// Execute query within transaction
-		rows, err := tx.QueryContext(ctx, statement, statementParams...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to execute query in transaction: %w", err)
-		}
-		defer func() {
-			if closeErr := rows.Close(); closeErr != nil {
-				logger.Error("Error closing rows: %v", closeErr)
+	// Execute with performance tracking
+	var finalResult interface{}
+	var err error
+
+	finalResult, err = analyzer.TrackQuery(ctx, statement, statementParams, func() (interface{}, error) {
+		var result interface{}
+
+		if isQuery {
+			// Execute query within transaction
+			rows, queryErr := tx.QueryContext(ctx, statement, statementParams...)
+			if queryErr != nil {
+				return nil, fmt.Errorf("failed to execute query in transaction: %w", queryErr)
 			}
-		}()
+			defer func() {
+				if closeErr := rows.Close(); closeErr != nil {
+					logger.Error("Error closing rows: %v", closeErr)
+				}
+			}()
 
-		// Convert rows to map
-		results, err := rowsToMaps(rows)
-		if err != nil {
-			return nil, fmt.Errorf("failed to process query results in transaction: %w", err)
+			// Convert rows to map
+			results, convErr := rowsToMaps(rows)
+			if convErr != nil {
+				return nil, fmt.Errorf("failed to process query results in transaction: %w", convErr)
+			}
+
+			result = map[string]interface{}{
+				"rows":  results,
+				"count": len(results),
+			}
+		} else {
+			// Execute statement within transaction
+			execResult, execErr := tx.ExecContext(ctx, statement, statementParams...)
+			if execErr != nil {
+				return nil, fmt.Errorf("failed to execute statement in transaction: %w", execErr)
+			}
+
+			// Get affected rows
+			rowsAffected, rowErr := execResult.RowsAffected()
+			if rowErr != nil {
+				rowsAffected = -1 // Unable to determine
+			}
+
+			// Get last insert ID (if applicable)
+			lastInsertID, idErr := execResult.LastInsertId()
+			if idErr != nil {
+				lastInsertID = -1 // Unable to determine
+			}
+
+			result = map[string]interface{}{
+				"rowsAffected": rowsAffected,
+				"lastInsertId": lastInsertID,
+			}
 		}
 
-		result = map[string]interface{}{
-			"rows":  results,
-			"count": len(results),
-		}
-	} else {
-		// Execute statement within transaction
-		execResult, err := tx.ExecContext(ctx, statement, statementParams...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to execute statement in transaction: %w", err)
-		}
+		// Return results with transaction info
+		return map[string]interface{}{
+			"transactionId": txID,
+			"statement":     statement,
+			"params":        statementParams,
+			"result":        result,
+		}, nil
+	})
 
-		// Get affected rows
-		rowsAffected, err := execResult.RowsAffected()
-		if err != nil {
-			rowsAffected = -1 // Unable to determine
-		}
-
-		// Get last insert ID (if applicable)
-		lastInsertID, err := execResult.LastInsertId()
-		if err != nil {
-			lastInsertID = -1 // Unable to determine
-		}
-
-		result = map[string]interface{}{
-			"rowsAffected": rowsAffected,
-			"lastInsertId": lastInsertID,
-		}
+	if err != nil {
+		return nil, err
 	}
 
-	// Return results
-	return map[string]interface{}{
-		"transactionId": txID,
-		"statement":     statement,
-		"params":        statementParams,
-		"result":        result,
-	}, nil
+	return finalResult, nil
 }
 
 // isQueryStatement determines if a statement is a query (SELECT) or not

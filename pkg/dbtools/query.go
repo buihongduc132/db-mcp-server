@@ -71,30 +71,45 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 		copy(queryParams, paramsArray)
 	}
 
-	// Execute query
-	rows, err := dbInstance.Query(timeoutCtx, query, queryParams...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute query: %w", err)
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			logger.Error("Error closing rows: %v", closeErr)
+	// Get the performance analyzer
+	analyzer := GetPerformanceAnalyzer()
+
+	// Execute query with performance tracking
+	var result interface{}
+	var err error
+
+	result, err = analyzer.TrackQuery(timeoutCtx, query, queryParams, func() (interface{}, error) {
+		// Execute query
+		rows, innerErr := dbInstance.Query(timeoutCtx, query, queryParams...)
+		if innerErr != nil {
+			return nil, fmt.Errorf("failed to execute query: %w", innerErr)
 		}
-	}()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				logger.Error("Error closing rows: %v", closeErr)
+			}
+		}()
 
-	// Convert rows to map
-	results, err := rowsToMaps(rows)
+		// Convert rows to map
+		results, innerErr := rowsToMaps(rows)
+		if innerErr != nil {
+			return nil, fmt.Errorf("failed to process query results: %w", innerErr)
+		}
+
+		// Return results
+		return map[string]interface{}{
+			"rows":   results,
+			"count":  len(results),
+			"query":  query,
+			"params": queryParams,
+		}, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to process query results: %w", err)
+		return nil, err
 	}
 
-	// Return results
-	return map[string]interface{}{
-		"rows":   results,
-		"count":  len(results),
-		"query":  query,
-		"params": queryParams,
-	}, nil
+	return result, nil
 }
 
 // createMockQueryTool creates a mock version of the query tool that works without database connection

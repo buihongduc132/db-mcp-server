@@ -214,6 +214,7 @@ The server currently includes four core database tools:
 | `dbTransaction` | Manages SQL transactions with commit and rollback support |
 | `dbSchema` | Auto-discovers database structure and relationships with support for tables, columns, and relationships |
 | `dbQueryBuilder` | Visual SQL query construction with syntax validation |
+| `dbPerformanceAnalyzer` | Identifies slow queries and provides optimization suggestions |
 
 ### Database Schema Explorer Tool
 
@@ -343,6 +344,106 @@ The Query Builder supports:
 - Syntax validation and error suggestions
 - Query complexity analysis
 
+### Performance Analyzer Tool
+
+The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnalyzer`) that identifies slow queries and provides optimization suggestions:
+
+```json
+// Get slow queries that exceed the configured threshold
+{
+  "name": "dbPerformanceAnalyzer",
+  "arguments": {
+    "action": "getSlowQueries",
+    "limit": 5
+  }
+}
+
+// Get metrics for all tracked queries sorted by average duration
+{
+  "name": "dbPerformanceAnalyzer",
+  "arguments": {
+    "action": "getMetrics",
+    "limit": 10
+  }
+}
+
+// Analyze a specific query for optimization opportunities
+{
+  "name": "dbPerformanceAnalyzer",
+  "arguments": {
+    "action": "analyzeQuery",
+    "query": "SELECT * FROM orders JOIN users ON orders.user_id = users.id WHERE orders.status = 'pending'"
+  }
+}
+
+// Reset all collected performance metrics
+{
+  "name": "dbPerformanceAnalyzer",
+  "arguments": {
+    "action": "reset"
+  }
+}
+
+// Set the threshold for identifying slow queries (in milliseconds)
+{
+  "name": "dbPerformanceAnalyzer",
+  "arguments": {
+    "action": "setThreshold",
+    "threshold": 300
+  }
+}
+```
+
+Example response from a performance analysis:
+
+```json
+{
+  "query": "SELECT * FROM orders JOIN users ON orders.user_id = users.id WHERE orders.status = 'pending'",
+  "suggestions": [
+    "Avoid using SELECT * - specify only the columns you need",
+    "Verify that ORDER BY columns are properly indexed",
+    "Consider adding appropriate indexes for frequently queried columns"
+  ]
+}
+```
+
+Example response from getting slow queries:
+
+```json
+{
+  "metrics": [
+    {
+      "query": "SELECT * FROM large_table WHERE status = ?",
+      "count": 15,
+      "totalDuration": "2.5s",
+      "minDuration": "120ms",
+      "maxDuration": "750ms",
+      "avgDuration": "166ms",
+      "lastExecuted": "2025-06-15T14:23:45Z"
+    },
+    {
+      "query": "SELECT order_id, SUM(amount) FROM order_items GROUP BY order_id",
+      "count": 8,
+      "totalDuration": "1.2s",
+      "minDuration": "110ms",
+      "maxDuration": "580ms",
+      "avgDuration": "150ms",
+      "lastExecuted": "2025-06-15T14:20:12Z"
+    }
+  ],
+  "count": 2,
+  "threshold": "100ms"
+}
+```
+
+The Performance Analyzer automatically tracks all query executions and provides:
+- Identification of slow-performing queries
+- Query execution metrics (count, min, max, average durations)
+- Pattern-based query analysis
+- Optimization suggestions
+- Performance trend monitoring
+- Configurable slow query thresholds
+
 ### Editor Integration
 
 The server includes support for editor-specific features through the `editor/context` method, enabling tools to be aware of:
@@ -360,7 +461,7 @@ We're committed to expanding DB MCP Server's capabilities. Here's our planned de
 ### Q2 2025
 - ✅ **Schema Explorer** - Auto-discover database structure and relationships
 - ✅ **Query Builder** - Visual SQL query construction with syntax validation
-- **Performance Analyzer** - Identify slow queries and optimization opportunities
+- ✅ **Performance Analyzer** - Identify slow queries and optimization opportunities
 
 ### Q3 2025
 - **Data Visualization** - Create charts and graphs from query results

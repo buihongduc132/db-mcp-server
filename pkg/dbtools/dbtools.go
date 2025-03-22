@@ -59,6 +59,9 @@ func InitDatabase(cfg *config.Config) error {
 	log.Printf("Connected to %s database at %s:%d/%s",
 		dbConfig.Type, dbConfig.Host, dbConfig.Port, dbConfig.Name)
 
+	// Initialize the performance analyzer
+	InitPerformanceAnalyzer()
+
 	return nil
 }
 
@@ -91,6 +94,9 @@ func RegisterDatabaseTools(registry *tools.Registry) {
 
 	// Register query builder tool
 	registry.RegisterTool(createQueryBuilderTool())
+
+	// Register performance analyzer tool
+	registry.RegisterTool(createPerformanceAnalyzerTool())
 }
 
 // RegisterSchemaExplorerTool registers only the schema explorer tool
@@ -116,6 +122,9 @@ func RegisterMockDatabaseTools(registry *tools.Registry) {
 
 	// Register query builder tool (has mock implementation)
 	registry.RegisterTool(createQueryBuilderTool())
+
+	// Register performance analyzer tool (works without real DB connection)
+	registry.RegisterTool(createPerformanceAnalyzerTool())
 }
 
 // Helper function to convert rows to a slice of maps

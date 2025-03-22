@@ -70,31 +70,46 @@ func handleExecute(ctx context.Context, params map[string]interface{}) (interfac
 		copy(statementParams, paramsArray)
 	}
 
-	// Execute statement
-	result, err := dbInstance.Exec(timeoutCtx, statement, statementParams...)
+	// Get the performance analyzer
+	analyzer := GetPerformanceAnalyzer()
+
+	// Execute statement with performance tracking
+	var result interface{}
+	var err error
+
+	result, err = analyzer.TrackQuery(timeoutCtx, statement, statementParams, func() (interface{}, error) {
+		// Execute statement
+		sqlResult, innerErr := dbInstance.Exec(timeoutCtx, statement, statementParams...)
+		if innerErr != nil {
+			return nil, fmt.Errorf("failed to execute statement: %w", innerErr)
+		}
+
+		// Get affected rows
+		rowsAffected, rowsErr := sqlResult.RowsAffected()
+		if rowsErr != nil {
+			rowsAffected = -1 // Unable to determine
+		}
+
+		// Get last insert ID (if applicable)
+		lastInsertID, idErr := sqlResult.LastInsertId()
+		if idErr != nil {
+			lastInsertID = -1 // Unable to determine
+		}
+
+		// Return results
+		return map[string]interface{}{
+			"rowsAffected": rowsAffected,
+			"lastInsertId": lastInsertID,
+			"statement":    statement,
+			"params":       statementParams,
+		}, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute statement: %w", err)
+		return nil, err
 	}
 
-	// Get affected rows
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		rowsAffected = -1 // Unable to determine
-	}
-
-	// Get last insert ID (if applicable)
-	lastInsertID, err := result.LastInsertId()
-	if err != nil {
-		lastInsertID = -1 // Unable to determine
-	}
-
-	// Return results
-	return map[string]interface{}{
-		"rowsAffected": rowsAffected,
-		"lastInsertId": lastInsertID,
-		"statement":    statement,
-		"params":       statementParams,
-	}, nil
+	return result, nil
 }
 
 // createMockExecuteTool creates a mock version of the execute tool that works without database connection
