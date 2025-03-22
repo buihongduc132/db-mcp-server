@@ -123,10 +123,10 @@ func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		eventText := fmt.Sprintf("event: %s\ndata: %s\n\n", event, string(data))
 
 		// Write the event
-		_, err := fmt.Fprint(w, eventText)
-		if err != nil {
-			logger.Error("Error writing event to client: %v", err)
-			return err
+		_, writeErr := fmt.Fprint(w, eventText)
+		if writeErr != nil {
+			logger.Error("Error writing event to client: %v", writeErr)
+			return writeErr
 		}
 
 		// Flush the response writer
@@ -237,15 +237,15 @@ func (t *SSETransport) HandleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Process the request with the handler
-	result, jsonRpcErr := t.processRequest(&req, sess, handler)
+	result, jsonRPCErr := t.processRequest(&req, sess, handler)
 
 	// Check if this is a notification (no ID)
 	isNotification := req.ID == nil
 
 	// Send the response back to the client
-	if jsonRpcErr != nil {
-		logger.Debug("Method handler error: %v", jsonRpcErr)
-		t.sendErrorResponse(w, req.ID, jsonRpcErr)
+	if jsonRPCErr != nil {
+		logger.Debug("Method handler error: %v", jsonRPCErr)
+		t.sendErrorResponse(w, req.ID, jsonRPCErr)
 	} else if isNotification {
 		// For notifications, return 202 Accepted without a response body
 		logger.Debug("Notification processed successfully")

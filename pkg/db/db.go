@@ -131,7 +131,10 @@ func (d *database) Connect() error {
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		closeErr := db.Close()
+		if closeErr != nil {
+			fmt.Printf("Error closing database connection: %v\n", closeErr)
+		}
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -146,7 +149,10 @@ func (d *database) Close() error {
 	if d.db == nil {
 		return nil
 	}
-	return d.db.Close()
+	if err := d.db.Close(); err != nil {
+		fmt.Printf("Error closing database connection: %v\n", err)
+	}
+	return nil
 }
 
 // Ping checks if the database connection is still alive

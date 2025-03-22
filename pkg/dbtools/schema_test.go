@@ -13,14 +13,14 @@ import (
 func TestSchemaExplorerTool(t *testing.T) {
 	// Get the tool
 	tool := createSchemaExplorerTool()
-	
+
 	// Assertions
 	assert.NotNil(t, tool)
 	assert.Equal(t, "dbSchema", tool.Name)
 	assert.Equal(t, "Auto-discover database structure and relationships", tool.Description)
 	assert.Equal(t, "database", tool.Category)
 	assert.NotNil(t, tool.Handler)
-	
+
 	// Check input schema
 	assert.Equal(t, "object", tool.InputSchema.Type)
 	assert.Contains(t, tool.InputSchema.Properties, "component")
@@ -36,10 +36,10 @@ func TestHandleSchemaExplorerWithInvalidComponent(t *testing.T) {
 	params := map[string]interface{}{
 		"component": "invalid",
 	}
-	
+
 	// Execute
 	result, err := handleSchemaExplorer(ctx, params)
-	
+
 	// Assertions
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -53,10 +53,10 @@ func TestHandleSchemaExplorerWithMissingTableParam(t *testing.T) {
 	params := map[string]interface{}{
 		"component": "columns",
 	}
-	
+
 	// Execute
 	result, err := handleSchemaExplorer(ctx, params)
-	
+
 	// Assertions
 	assert.Error(t, err)
 	assert.Nil(t, result)
@@ -128,7 +128,7 @@ func (m *MockDatabase) DB() *sql.DB {
 func TestGetTablesWithMock(t *testing.T) {
 	// Skip the test if the code is too complex to mock or needs significant refactoring
 	t.Skip("Skipping test until the schema.go code can be refactored to better support unit testing")
-	
+
 	// In a real fix, the schema.go code should be refactored to:
 	// 1. Add a check at the beginning of getTables for nil dbInstance and dbConfig
 	// 2. Return mock data in that case instead of proceeding with the query
@@ -139,9 +139,9 @@ func TestGetTablesWithMock(t *testing.T) {
 func TestGetFullSchema(t *testing.T) {
 	// Skip the test if the code is too complex to mock or needs significant refactoring
 	t.Skip("Skipping test until the schema.go code can be refactored to better support unit testing")
-	
+
 	// In a real fix, the schema.go code should be refactored to:
 	// 1. Add a check at the beginning of getFullSchema for nil dbInstance and dbConfig
 	// 2. Return mock data in that case instead of proceeding with the query
 	// 3. Ensure the mock data has the "mock" flag set to true
-} 
+}

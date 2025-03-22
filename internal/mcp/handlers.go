@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	// Latest protocol version supported
+	// ProtocolVersion is the latest protocol version supported
 	ProtocolVersion = "2024-11-05"
 )
 
@@ -325,12 +325,12 @@ func (h *Handler) ExecuteTool(req *jsonrpc.Request, sess *session.Session) (inte
 	// Handle different types of Params
 	if req.Params == nil {
 		logger.Warn("ExecuteTool request has no params")
-		jsonRpcErr := &jsonrpc.Error{
+		jsonRPCErr := &jsonrpc.Error{
 			Code:    jsonrpc.ParseErrorCode,
 			Message: "Missing tool parameters",
 		}
-		logRequestResponse(req.Method, req, sess, nil, jsonRpcErr)
-		return nil, jsonRpcErr
+		logRequestResponse(req.Method, req, sess, nil, jsonRPCErr)
+		return nil, jsonRPCErr
 	} else if paramsMap, ok := req.Params.(map[string]interface{}); ok {
 		// If params is already a map, use it directly
 		if name, ok := paramsMap["name"].(string); ok {
@@ -367,22 +367,22 @@ func (h *Handler) ExecuteTool(req *jsonrpc.Request, sess *session.Session) (inte
 		paramsJSON, err := json.Marshal(req.Params)
 		if err != nil {
 			logger.Error("Failed to marshal params: %v", err)
-			jsonRpcErr := &jsonrpc.Error{
+			jsonRPCErr := &jsonrpc.Error{
 				Code:    jsonrpc.ParseErrorCode,
 				Message: "Invalid params",
 			}
-			logRequestResponse(req.Method, req, sess, nil, jsonRpcErr)
-			return nil, jsonRpcErr
+			logRequestResponse(req.Method, req, sess, nil, jsonRPCErr)
+			return nil, jsonRPCErr
 		}
 
 		if err := json.Unmarshal(paramsJSON, &params); err != nil {
 			logger.Error("Failed to unmarshal params: %v", err)
-			jsonRpcErr := &jsonrpc.Error{
+			jsonRPCErr := &jsonrpc.Error{
 				Code:    jsonrpc.ParseErrorCode,
 				Message: "Invalid params",
 			}
-			logRequestResponse(req.Method, req, sess, nil, jsonRpcErr)
-			return nil, jsonRpcErr
+			logRequestResponse(req.Method, req, sess, nil, jsonRPCErr)
+			return nil, jsonRPCErr
 		}
 	}
 
@@ -393,12 +393,12 @@ func (h *Handler) ExecuteTool(req *jsonrpc.Request, sess *session.Session) (inte
 	// Validate required parameters
 	if params.Name == "" {
 		logger.Error("Missing tool name")
-		jsonRpcErr := &jsonrpc.Error{
+		jsonRPCErr := &jsonrpc.Error{
 			Code:    jsonrpc.ParseErrorCode,
 			Message: "Missing tool name",
 		}
-		logRequestResponse(req.Method, req, sess, nil, jsonRpcErr)
-		return nil, jsonRpcErr
+		logRequestResponse(req.Method, req, sess, nil, jsonRPCErr)
+		return nil, jsonRPCErr
 	}
 
 	logger.Info("Executing tool: %s", params.Name)
@@ -411,12 +411,12 @@ func (h *Handler) ExecuteTool(req *jsonrpc.Request, sess *session.Session) (inte
 		availableTools := h.ListAvailableTools()
 		logger.Debug("Available tools: %s", availableTools)
 
-		jsonRpcErr := &jsonrpc.Error{
+		jsonRPCErr := &jsonrpc.Error{
 			Code:    jsonrpc.MethodNotFoundCode,
 			Message: fmt.Sprintf("Tool not found: %s", params.Name),
 		}
-		logRequestResponse(req.Method, req, sess, nil, jsonRpcErr)
-		return nil, jsonRpcErr
+		logRequestResponse(req.Method, req, sess, nil, jsonRPCErr)
+		return nil, jsonRPCErr
 	}
 
 	// Log tool arguments for debugging
@@ -626,7 +626,7 @@ func (h *Handler) HandleEditorContext(req *jsonrpc.Request, sess *session.Sessio
 	return map[string]interface{}{}, nil
 }
 
-// listAvailableTools returns a list of available tool names as a comma-separated string
+// ListAvailableTools returns a list of available tool names as a comma-separated string
 func (h *Handler) ListAvailableTools() string {
 	tools := h.toolRegistry.GetAllTools()
 	names := make([]string, 0, len(tools))
@@ -664,12 +664,12 @@ func (h *Handler) HandleCancel(req *jsonrpc.Request, sess *session.Session) (int
 	// Handle different types of Params
 	if req.Params == nil {
 		logger.Warn("Cancel request has no params")
-		jsonRpcErr := &jsonrpc.Error{
+		jsonRPCErr := &jsonrpc.Error{
 			Code:    jsonrpc.ParseErrorCode,
 			Message: "Missing cancel parameters",
 		}
-		logRequestResponse("cancel", req, sess, nil, jsonRpcErr)
-		return nil, jsonRpcErr
+		logRequestResponse("cancel", req, sess, nil, jsonRPCErr)
+		return nil, jsonRPCErr
 	} else if paramsMap, ok := req.Params.(map[string]interface{}); ok {
 		// If params is already a map, use it directly
 		if id, ok := paramsMap["id"]; ok {
@@ -680,22 +680,22 @@ func (h *Handler) HandleCancel(req *jsonrpc.Request, sess *session.Session) (int
 		paramsJSON, err := json.Marshal(req.Params)
 		if err != nil {
 			logger.Error("Failed to marshal params: %v", err)
-			jsonRpcErr := &jsonrpc.Error{
+			jsonRPCErr := &jsonrpc.Error{
 				Code:    jsonrpc.ParseErrorCode,
 				Message: "Invalid params",
 			}
-			logRequestResponse("cancel", req, sess, nil, jsonRpcErr)
-			return nil, jsonRpcErr
+			logRequestResponse("cancel", req, sess, nil, jsonRPCErr)
+			return nil, jsonRPCErr
 		}
 
 		if err := json.Unmarshal(paramsJSON, &params); err != nil {
 			logger.Error("Failed to unmarshal params: %v", err)
-			jsonRpcErr := &jsonrpc.Error{
+			jsonRPCErr := &jsonrpc.Error{
 				Code:    jsonrpc.ParseErrorCode,
 				Message: "Invalid params",
 			}
-			logRequestResponse("cancel", req, sess, nil, jsonRpcErr)
-			return nil, jsonRpcErr
+			logRequestResponse("cancel", req, sess, nil, jsonRPCErr)
+			return nil, jsonRPCErr
 		}
 	}
 

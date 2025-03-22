@@ -204,3 +204,77 @@ func TestGetTableFromQuery(t *testing.T) {
 	// No FROM clause should return unknown
 	assert.Equal(t, "unknown_table", getTableFromQuery("SELECT 1 + 1"))
 }
+
+// TestValidateQuery tests the validate query function
+func TestValidateQuery(t *testing.T) {
+	// Setup context
+	ctx := context.Background()
+
+	// Test with valid query
+	validParams := map[string]interface{}{
+		"query": "SELECT * FROM users WHERE id > 10",
+	}
+	validResult, err := validateQuery(ctx, validParams)
+	assert.NoError(t, err)
+	resultMap, ok := validResult.(map[string]interface{})
+	assert.True(t, ok)
+	assert.True(t, resultMap["valid"].(bool))
+
+	// Test with missing query parameter
+	missingQueryParams := map[string]interface{}{}
+	_, err = validateQuery(ctx, missingQueryParams)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "query parameter is required")
+}
+
+// TestAnalyzeQuery tests the analyze query function
+func TestAnalyzeQuery(t *testing.T) {
+	// Setup context
+	ctx := context.Background()
+
+	// Test with valid query
+	validParams := map[string]interface{}{
+		"query": "SELECT * FROM users JOIN orders ON users.id = orders.user_id",
+	}
+
+	result, err := analyzeQuery(ctx, validParams)
+	assert.NoError(t, err)
+
+	// Since we may not have a real DB connection, the function will likely use mockAnalyzeQuery
+	// which we've already tested. Check that something is returned.
+	resultMap, ok := result.(map[string]interface{})
+	assert.True(t, ok)
+	assert.Contains(t, resultMap, "query")
+	assert.Contains(t, resultMap, "issues")
+	assert.Contains(t, resultMap, "complexity")
+
+	// Test with missing query parameter
+	missingQueryParams := map[string]interface{}{}
+	_, err = analyzeQuery(ctx, missingQueryParams)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "query parameter is required")
+}
+
+// TestGetSuggestionForError tests the error suggestion functionality
+func TestGetSuggestionForError(t *testing.T) {
+	// Test various error types
+	assert.Contains(t, getSuggestionForError("syntax error"), "Check SQL syntax")
+	assert.Contains(t, getSuggestionForError("unknown column"), "Column name is incorrect")
+	assert.Contains(t, getSuggestionForError("unknown table"), "Table name is incorrect")
+	assert.Contains(t, getSuggestionForError("ambiguous column"), "Column name is ambiguous")
+	assert.Contains(t, getSuggestionForError("missing from clause"), "FROM clause is missing")
+	assert.Contains(t, getSuggestionForError("no such table"), "Table specified does not exist")
+
+	// Test fallback suggestion
+	assert.Equal(t, "Review the query syntax and structure", getSuggestionForError("other error"))
+}
+
+// TestGetErrorLineColumnFromMessage tests error position extraction functions
+func TestGetErrorLineColumnFromMessage(t *testing.T) {
+	// Test line extraction - MySQL style
+	assert.Equal(t, 3, getErrorLineFromMessage("ERROR at line 3: syntax error"))
+
+	// Test with no line/column info
+	assert.Equal(t, 0, getErrorLineFromMessage("syntax error"))
+	assert.Equal(t, 0, getErrorColumnFromMessage("syntax error"))
+}

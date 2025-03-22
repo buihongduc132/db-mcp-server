@@ -142,13 +142,13 @@ func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHand
 func registerDatabaseTools(toolRegistry *tools.Registry) {
 	// Initialize database connection
 	cfg := config.LoadConfig()
-	
+
 	// Try to initialize database
 	err := dbtools.InitDatabase(cfg)
 	if err != nil {
 		logger.Error("Failed to initialize database: %v", err)
 		logger.Warn("Using mock database tools")
-		
+
 		// Register all tools with mock implementations
 		dbtools.RegisterMockDatabaseTools(toolRegistry)
 		logger.Info("Mock database tools registered successfully")

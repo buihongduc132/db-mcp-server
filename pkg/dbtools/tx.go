@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FreePeak/db-mcp-server/internal/logger"
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
@@ -228,7 +229,11 @@ func executeInTransaction(ctx context.Context, params map[string]interface{}) (i
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute query in transaction: %w", err)
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				logger.Error("Error closing rows: %v", closeErr)
+			}
+		}()
 
 		// Convert rows to map
 		results, err := rowsToMaps(rows)

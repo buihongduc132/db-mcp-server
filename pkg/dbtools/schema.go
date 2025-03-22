@@ -169,7 +169,11 @@ func getTables(ctx context.Context) (interface{}, error) {
 			log.Printf("dbSchema getTables: SHOW TABLES query failed: %v", err)
 			return nil, fmt.Errorf("failed to query tables: %w", err)
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Printf("dbSchema getTables: Error closing rows: %v", closeErr)
+			}
+		}()
 
 		// Convert to a list of tables
 		var tables []map[string]interface{}
@@ -207,7 +211,11 @@ func getTables(ctx context.Context) (interface{}, error) {
 		log.Printf("dbSchema getTables: Query failed: %v", err)
 		return nil, fmt.Errorf("failed to query tables: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("dbSchema getTables: Error closing rows: %v", closeErr)
+		}
+	}()
 
 	// Convert rows to map
 	tables, err := rowsToMaps(rows)
@@ -312,7 +320,11 @@ func getColumns(ctx context.Context, table string) (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query columns for table %s: %w", table, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("dbSchema getColumns: Error closing rows: %v", closeErr)
+		}
+	}()
 
 	// Convert rows to map
 	columns, err := rowsToMaps(rows)
@@ -401,7 +413,11 @@ func getRelationships(ctx context.Context, table string) (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query relationships: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("dbSchema getRelationships: Error closing rows: %v", closeErr)
+		}
+	}()
 
 	// Convert rows to map
 	relationships, err := rowsToMaps(rows)

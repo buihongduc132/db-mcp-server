@@ -10,8 +10,16 @@ import (
 
 func TestGetEnv(t *testing.T) {
 	// Setup
-	os.Setenv("TEST_ENV_VAR", "test_value")
-	defer os.Unsetenv("TEST_ENV_VAR")
+	err := os.Setenv("TEST_ENV_VAR", "test_value")
+	if err != nil {
+		t.Fatalf("Failed to set environment variable: %v", err)
+	}
+	defer func() {
+		err := os.Unsetenv("TEST_ENV_VAR")
+		if err != nil {
+			t.Fatalf("Failed to unset environment variable: %v", err)
+		}
+	}()
 
 	// Test with existing env var
 	value := getEnv("TEST_ENV_VAR", "default_value")
@@ -24,15 +32,17 @@ func TestGetEnv(t *testing.T) {
 
 func TestLoadConfig(t *testing.T) {
 	// Clear any environment variables that might affect the test
-	os.Unsetenv("SERVER_PORT")
-	os.Unsetenv("TRANSPORT_MODE")
-	os.Unsetenv("LOG_LEVEL")
-	os.Unsetenv("DB_TYPE")
-	os.Unsetenv("DB_HOST")
-	os.Unsetenv("DB_PORT")
-	os.Unsetenv("DB_USER")
-	os.Unsetenv("DB_PASSWORD")
-	os.Unsetenv("DB_NAME")
+	vars := []string{
+		"SERVER_PORT", "TRANSPORT_MODE", "LOG_LEVEL", "DB_TYPE",
+		"DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME",
+	}
+
+	for _, v := range vars {
+		err := os.Unsetenv(v)
+		if err != nil {
+			t.Logf("Failed to unset %s: %v", v, err)
+		}
+	}
 
 	// Get current working directory and handle .env file
 	cwd, _ := os.Getwd()
@@ -70,25 +80,49 @@ func TestLoadConfig(t *testing.T) {
 	assert.Equal(t, "", config.DBConfig.Name)
 
 	// Test with custom environment variables
-	os.Setenv("SERVER_PORT", "8080")
-	os.Setenv("TRANSPORT_MODE", "stdio")
-	os.Setenv("LOG_LEVEL", "debug")
-	os.Setenv("DB_TYPE", "postgres")
-	os.Setenv("DB_HOST", "db.example.com")
-	os.Setenv("DB_PORT", "5432")
-	os.Setenv("DB_USER", "testuser")
-	os.Setenv("DB_PASSWORD", "testpass")
-	os.Setenv("DB_NAME", "testdb")
+	err := os.Setenv("SERVER_PORT", "8080")
+	if err != nil {
+		t.Fatalf("Failed to set SERVER_PORT: %v", err)
+	}
+	err = os.Setenv("TRANSPORT_MODE", "stdio")
+	if err != nil {
+		t.Fatalf("Failed to set TRANSPORT_MODE: %v", err)
+	}
+	err = os.Setenv("LOG_LEVEL", "debug")
+	if err != nil {
+		t.Fatalf("Failed to set LOG_LEVEL: %v", err)
+	}
+	err = os.Setenv("DB_TYPE", "postgres")
+	if err != nil {
+		t.Fatalf("Failed to set DB_TYPE: %v", err)
+	}
+	err = os.Setenv("DB_HOST", "db.example.com")
+	if err != nil {
+		t.Fatalf("Failed to set DB_HOST: %v", err)
+	}
+	err = os.Setenv("DB_PORT", "5432")
+	if err != nil {
+		t.Fatalf("Failed to set DB_PORT: %v", err)
+	}
+	err = os.Setenv("DB_USER", "testuser")
+	if err != nil {
+		t.Fatalf("Failed to set DB_USER: %v", err)
+	}
+	err = os.Setenv("DB_PASSWORD", "testpass")
+	if err != nil {
+		t.Fatalf("Failed to set DB_PASSWORD: %v", err)
+	}
+	err = os.Setenv("DB_NAME", "testdb")
+	if err != nil {
+		t.Fatalf("Failed to set DB_NAME: %v", err)
+	}
+
 	defer func() {
-		os.Unsetenv("SERVER_PORT")
-		os.Unsetenv("TRANSPORT_MODE")
-		os.Unsetenv("LOG_LEVEL")
-		os.Unsetenv("DB_TYPE")
-		os.Unsetenv("DB_HOST")
-		os.Unsetenv("DB_PORT")
-		os.Unsetenv("DB_USER")
-		os.Unsetenv("DB_PASSWORD")
-		os.Unsetenv("DB_NAME")
+		for _, v := range vars {
+			if err := os.Unsetenv(v); err != nil {
+				t.Logf("Failed to unset %s: %v", v, err)
+			}
+		}
 	}()
 
 	config = LoadConfig()
