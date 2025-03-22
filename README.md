@@ -205,7 +205,7 @@ The DB MCP Server includes a powerful tool system that allows clients to discove
 
 ### Built-in Tools
 
-The server currently includes three core database tools:
+The server currently includes four core database tools:
 
 | Tool | Description |
 |------|-------------|
@@ -213,6 +213,7 @@ The server currently includes three core database tools:
 | `dbExecute` | Performs data modification operations (INSERT, UPDATE, DELETE) |
 | `dbTransaction` | Manages SQL transactions with commit and rollback support |
 | `dbSchema` | Auto-discovers database structure and relationships with support for tables, columns, and relationships |
+| `dbQueryBuilder` | Visual SQL query construction with syntax validation |
 
 ### Database Schema Explorer Tool
 
@@ -256,6 +257,92 @@ The MCP Server includes a powerful Database Schema Explorer tool (`dbSchema`) th
 
 The Schema Explorer supports both MySQL and PostgreSQL databases and automatically adapts to your configured database type.
 
+### Visual Query Builder Tool
+
+The MCP Server includes a powerful Visual Query Builder tool (`dbQueryBuilder`) that helps you construct SQL queries with syntax validation:
+
+```json
+// Validate a SQL query for syntax errors
+{
+  "name": "dbQueryBuilder",
+  "arguments": {
+    "action": "validate",
+    "query": "SELECT * FROM users WHERE status = 'active'"
+  }
+}
+
+// Build a SQL query from components
+{
+  "name": "dbQueryBuilder",
+  "arguments": {
+    "action": "build",
+    "components": {
+      "select": ["id", "name", "email"],
+      "from": "users",
+      "where": [
+        {
+          "column": "status",
+          "operator": "=",
+          "value": "active"
+        }
+      ],
+      "orderBy": [
+        {
+          "column": "name",
+          "direction": "ASC"
+        }
+      ],
+      "limit": 10
+    }
+  }
+}
+
+// Analyze a SQL query for potential issues and performance
+{
+  "name": "dbQueryBuilder",
+  "arguments": {
+    "action": "analyze",
+    "query": "SELECT u.*, o.* FROM users u JOIN orders o ON u.id = o.user_id WHERE u.status = 'active' AND o.created_at > '2023-01-01'"
+  }
+}
+```
+
+Example response from a query build operation:
+
+```json
+{
+  "query": "SELECT id, name, email FROM users WHERE status = 'active' ORDER BY name ASC LIMIT 10",
+  "components": {
+    "select": ["id", "name", "email"],
+    "from": "users",
+    "where": [{
+      "column": "status",
+      "operator": "=",
+      "value": "active"
+    }],
+    "orderBy": [{
+      "column": "name",
+      "direction": "ASC"
+    }],
+    "limit": 10
+  },
+  "validation": {
+    "valid": true,
+    "query": "SELECT id, name, email FROM users WHERE status = 'active' ORDER BY name ASC LIMIT 10"
+  }
+}
+```
+
+The Query Builder supports:
+- SELECT statements with multiple columns
+- JOIN operations (inner, left, right, full)
+- WHERE conditions with various operators
+- GROUP BY and HAVING clauses
+- ORDER BY with sorting direction
+- LIMIT and OFFSET for pagination
+- Syntax validation and error suggestions
+- Query complexity analysis
+
 ### Editor Integration
 
 The server includes support for editor-specific features through the `editor/context` method, enabling tools to be aware of:
@@ -272,7 +359,7 @@ We're committed to expanding DB MCP Server's capabilities. Here's our planned de
 
 ### Q2 2025
 - ✅ **Schema Explorer** - Auto-discover database structure and relationships
-- **Query Builder** - Visual SQL query construction with syntax validation
+- ✅ **Query Builder** - Visual SQL query construction with syntax validation
 - **Performance Analyzer** - Identify slow queries and optimization opportunities
 
 ### Q3 2025

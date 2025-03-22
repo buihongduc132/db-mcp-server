@@ -85,9 +85,12 @@ func RegisterDatabaseTools(registry *tools.Registry) {
 
 	// Register transaction tool
 	registry.RegisterTool(createTransactionTool())
-	
+
 	// Register schema explorer tool
 	registry.RegisterTool(createSchemaExplorerTool())
+
+	// Register query builder tool
+	registry.RegisterTool(createQueryBuilderTool())
 }
 
 // RegisterSchemaExplorerTool registers only the schema explorer tool
@@ -101,15 +104,18 @@ func RegisterSchemaExplorerTool(registry *tools.Registry) {
 func RegisterMockDatabaseTools(registry *tools.Registry) {
 	// Register mock query tool
 	registry.RegisterTool(createMockQueryTool())
-	
+
 	// Register mock execute tool
 	registry.RegisterTool(createMockExecuteTool())
-	
+
 	// Register mock transaction tool
 	registry.RegisterTool(createMockTransactionTool())
-	
+
 	// Register schema explorer tool (already uses mock data)
 	registry.RegisterTool(createSchemaExplorerTool())
+
+	// Register query builder tool (has mock implementation)
+	registry.RegisterTool(createQueryBuilderTool())
 }
 
 // Helper function to convert rows to a slice of maps

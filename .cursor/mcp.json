@@ -1,8 +1,7 @@
 {
-    "mcp_servers": [
-        {
-            "name": "db-mcp-server",
+    "mcpServers": {
+        "my-testing-db-mcp-server": {
             "url": "http://localhost:9090/sse"
         }
-    ]
-}
+    }
+  }
