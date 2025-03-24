@@ -70,7 +70,10 @@ func (t *StdioTransport) Start() error {
 				return writeErr
 			}
 			// Force flush stdout to ensure immediate delivery
-			os.Stdout.Sync()
+			if syncErr := os.Stdout.Sync(); syncErr != nil {
+				logger.Error("Error syncing stdout: %v", syncErr)
+				return syncErr
+			}
 		}
 		return nil
 	}
