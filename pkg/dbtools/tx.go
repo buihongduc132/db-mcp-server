@@ -7,12 +7,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FreePeak/db-mcp-server/internal/logger"
+	"github.com/FreePeak/db-mcp-server/pkg/db"
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
-// Transaction state storage (in-memory)
-var activeTransactions = make(map[string]*sql.Tx)
+// Map to store active transactions
+var transactions = make(map[string]*sql.Tx)
+
+// getBoolParam extracts a boolean parameter from the params map
+func getBoolParam(params map[string]interface{}, key string) (bool, bool) {
+	if val, ok := params[key].(bool); ok {
+		return val, true
+	}
+	return false, false
+}
+
+// generateTransactionId generates a unique transaction ID
+func generateTransactionId() string {
+	return fmt.Sprintf("tx-%d", time.Now().UnixNano())
+}
 
 // createTransactionTool creates a tool for managing database transactions
 func createTransactionTool() *tools.Tool {
@@ -27,10 +40,6 @@ func createTransactionTool() *tools.Tool {
 					"type":        "string",
 					"description": "Action to perform (begin, commit, rollback, execute)",
 					"enum":        []string{"begin", "commit", "rollback", "execute"},
-				},
-				"transactionId": map[string]interface{}{
-					"type":        "string",
-					"description": "Transaction ID (returned from begin, required for all other actions)",
 				},
 				"statement": map[string]interface{}{
 					"type":        "string",
@@ -51,8 +60,16 @@ func createTransactionTool() *tools.Tool {
 					"type":        "integer",
 					"description": "Timeout in milliseconds (default: 30000)",
 				},
+				"transactionId": map[string]interface{}{
+					"type":        "string",
+					"description": "Transaction ID (returned from begin, required for all other actions)",
+				},
+				"databaseId": map[string]interface{}{
+					"type":        "string",
+					"description": "ID of the database to use",
+				},
 			},
-			Required: []string{"action"},
+			Required: []string{"action", "databaseId"},
 		},
 		Handler: handleTransaction,
 	}
@@ -60,238 +77,165 @@ func createTransactionTool() *tools.Tool {
 
 // handleTransaction handles the transaction tool execution
 func handleTransaction(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Check if database is initialized
-	if dbInstance == nil {
-		return nil, fmt.Errorf("database not initialized")
+	// Check if database manager is initialized
+	if dbManager == nil {
+		return nil, fmt.Errorf("database manager not initialized")
 	}
 
-	// Extract action
+	// Extract parameters
 	action, ok := getStringParam(params, "action")
 	if !ok {
 		return nil, fmt.Errorf("action parameter is required")
 	}
 
-	// Handle different actions
-	switch action {
-	case "begin":
-		return beginTransaction(ctx, params)
-	case "commit":
-		return commitTransaction(ctx, params)
-	case "rollback":
-		return rollbackTransaction(ctx, params)
-	case "execute":
-		return executeInTransaction(ctx, params)
-	default:
-		return nil, fmt.Errorf("invalid action: %s", action)
+	// Get database ID
+	databaseId, ok := getStringParam(params, "databaseId")
+	if !ok {
+		return nil, fmt.Errorf("databaseId parameter is required")
 	}
-}
 
-// beginTransaction starts a new transaction
-func beginTransaction(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Extract timeout
-	timeout := 30000 // Default timeout: 30 seconds
-	if timeoutParam, ok := getIntParam(params, "timeout"); ok {
-		timeout = timeoutParam
+	// Get database instance
+	db, err := dbManager.GetDB(databaseId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database: %w", err)
+	}
+
+	// Extract optional parameters
+	statement, _ := getStringParam(params, "statement")
+	transactionId, _ := getStringParam(params, "transactionId")
+	readOnly, _ := getBoolParam(params, "readOnly")
+	paramArray, _ := getArrayParam(params, "params")
+	timeout, hasTimeout := getIntParam(params, "timeout")
+	if !hasTimeout {
+		timeout = 30000 // Default timeout: 30 seconds
+	}
+
+	// Convert interface array to string array
+	var paramStrings []string
+	if paramArray != nil {
+		paramStrings = make([]string, len(paramArray))
+		for i, p := range paramArray {
+			if str, ok := p.(string); ok {
+				paramStrings[i] = str
+			}
+		}
 	}
 
 	// Create context with timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	// Extract read-only flag
-	readOnly := false
-	if readOnlyParam, ok := params["readOnly"].(bool); ok {
-		readOnly = readOnlyParam
+	// Execute requested action
+	switch action {
+	case "begin":
+		return beginTransaction(timeoutCtx, db, readOnly)
+	case "commit":
+		if transactionId == "" {
+			return nil, fmt.Errorf("transactionId parameter is required for commit action")
+		}
+		return commitTransaction(timeoutCtx, transactionId)
+	case "rollback":
+		if transactionId == "" {
+			return nil, fmt.Errorf("transactionId parameter is required for rollback action")
+		}
+		return rollbackTransaction(timeoutCtx, transactionId)
+	case "execute":
+		if transactionId == "" {
+			return nil, fmt.Errorf("transactionId parameter is required for execute action")
+		}
+		if statement == "" {
+			return nil, fmt.Errorf("statement parameter is required for execute action")
+		}
+		return executeInTransaction(timeoutCtx, transactionId, statement, paramStrings)
+	default:
+		return nil, fmt.Errorf("invalid action: %s", action)
 	}
+}
 
-	// Set transaction options
+// beginTransaction starts a new transaction
+func beginTransaction(ctx context.Context, db db.Database, readOnly bool) (interface{}, error) {
 	txOpts := &sql.TxOptions{
 		ReadOnly: readOnly,
 	}
 
-	// Begin transaction
-	tx, err := dbInstance.BeginTx(timeoutCtx, txOpts)
+	tx, err := db.BeginTx(ctx, txOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	// Generate transaction ID
-	txID := fmt.Sprintf("tx-%d", time.Now().UnixNano())
+	// Generate a unique transaction ID
+	txId := generateTransactionId()
+	transactions[txId] = tx
 
-	// Store transaction
-	activeTransactions[txID] = tx
-
-	// Return transaction ID
 	return map[string]interface{}{
-		"transactionId": txID,
+		"transactionId": txId,
 		"readOnly":      readOnly,
-		"status":        "active",
 	}, nil
 }
 
 // commitTransaction commits a transaction
-func commitTransaction(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Extract transaction ID
-	txID, ok := getStringParam(params, "transactionId")
+func commitTransaction(ctx context.Context, txId string) (interface{}, error) {
+	tx, ok := transactions[txId]
 	if !ok {
-		return nil, fmt.Errorf("transactionId parameter is required")
+		return nil, fmt.Errorf("transaction not found: %s", txId)
 	}
 
-	// Get transaction
-	tx, ok := activeTransactions[txID]
-	if !ok {
-		return nil, fmt.Errorf("transaction not found: %s", txID)
-	}
-
-	// Commit transaction
-	err := tx.Commit()
-
-	// Remove transaction from storage
-	delete(activeTransactions, txID)
-
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// Return success
+	delete(transactions, txId)
 	return map[string]interface{}{
-		"transactionId": txID,
-		"status":        "committed",
+		"status":  "success",
+		"message": "Transaction committed successfully",
 	}, nil
 }
 
 // rollbackTransaction rolls back a transaction
-func rollbackTransaction(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Extract transaction ID
-	txID, ok := getStringParam(params, "transactionId")
+func rollbackTransaction(ctx context.Context, txId string) (interface{}, error) {
+	tx, ok := transactions[txId]
 	if !ok {
-		return nil, fmt.Errorf("transactionId parameter is required")
+		return nil, fmt.Errorf("transaction not found: %s", txId)
 	}
 
-	// Get transaction
-	tx, ok := activeTransactions[txID]
-	if !ok {
-		return nil, fmt.Errorf("transaction not found: %s", txID)
-	}
-
-	// Rollback transaction
-	err := tx.Rollback()
-
-	// Remove transaction from storage
-	delete(activeTransactions, txID)
-
-	if err != nil {
+	if err := tx.Rollback(); err != nil {
 		return nil, fmt.Errorf("failed to rollback transaction: %w", err)
 	}
 
-	// Return success
+	delete(transactions, txId)
 	return map[string]interface{}{
-		"transactionId": txID,
-		"status":        "rolled back",
+		"status":  "success",
+		"message": "Transaction rolled back successfully",
 	}, nil
 }
 
 // executeInTransaction executes a statement within a transaction
-func executeInTransaction(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Extract transaction ID
-	txID, ok := getStringParam(params, "transactionId")
+func executeInTransaction(ctx context.Context, txId string, statement string, params []string) (interface{}, error) {
+	tx, ok := transactions[txId]
 	if !ok {
-		return nil, fmt.Errorf("transactionId parameter is required")
+		return nil, fmt.Errorf("transaction not found: %s", txId)
 	}
 
-	// Get transaction
-	tx, ok := activeTransactions[txID]
-	if !ok {
-		return nil, fmt.Errorf("transaction not found: %s", txID)
+	// Convert string parameters to interface{}
+	args := make([]interface{}, len(params))
+	for i, p := range params {
+		args[i] = p
 	}
 
-	// Extract statement
-	statement, ok := getStringParam(params, "statement")
-	if !ok {
-		return nil, fmt.Errorf("statement parameter is required")
-	}
-
-	// Extract statement parameters
-	var statementParams []interface{}
-	if paramsArray, ok := getArrayParam(params, "params"); ok {
-		statementParams = make([]interface{}, len(paramsArray))
-		copy(statementParams, paramsArray)
-	}
-
-	// Check if statement is a query or an execute statement
-	isQuery := isQueryStatement(statement)
-
-	// Get the performance analyzer
-	analyzer := GetPerformanceAnalyzer()
-
-	// Execute with performance tracking
-	var finalResult interface{}
-	var err error
-
-	finalResult, err = analyzer.TrackQuery(ctx, statement, statementParams, func() (interface{}, error) {
-		var result interface{}
-
-		if isQuery {
-			// Execute query within transaction
-			rows, queryErr := tx.QueryContext(ctx, statement, statementParams...)
-			if queryErr != nil {
-				return nil, fmt.Errorf("failed to execute query in transaction: %w", queryErr)
-			}
-			defer func() {
-				if closeErr := rows.Close(); closeErr != nil {
-					logger.Error("Error closing rows: %v", closeErr)
-				}
-			}()
-
-			// Convert rows to map
-			results, convErr := rowsToMaps(rows)
-			if convErr != nil {
-				return nil, fmt.Errorf("failed to process query results in transaction: %w", convErr)
-			}
-
-			result = map[string]interface{}{
-				"rows":  results,
-				"count": len(results),
-			}
-		} else {
-			// Execute statement within transaction
-			execResult, execErr := tx.ExecContext(ctx, statement, statementParams...)
-			if execErr != nil {
-				return nil, fmt.Errorf("failed to execute statement in transaction: %w", execErr)
-			}
-
-			// Get affected rows
-			rowsAffected, rowErr := execResult.RowsAffected()
-			if rowErr != nil {
-				rowsAffected = -1 // Unable to determine
-			}
-
-			// Get last insert ID (if applicable)
-			lastInsertID, idErr := execResult.LastInsertId()
-			if idErr != nil {
-				lastInsertID = -1 // Unable to determine
-			}
-
-			result = map[string]interface{}{
-				"rowsAffected": rowsAffected,
-				"lastInsertId": lastInsertID,
-			}
-		}
-
-		// Return results with transaction info
-		return map[string]interface{}{
-			"transactionId": txID,
-			"statement":     statement,
-			"params":        statementParams,
-			"result":        result,
-		}, nil
-	})
-
+	result, err := tx.Exec(statement, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to execute statement in transaction: %w", err)
 	}
 
-	return finalResult, nil
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return map[string]interface{}{
+		"status":       "success",
+		"rowsAffected": rowsAffected,
+	}, nil
 }
 
 // isQueryStatement determines if a statement is a query (SELECT) or not

@@ -33,8 +33,12 @@ func createExecuteTool() *tools.Tool {
 					"type":        "integer",
 					"description": "Execution timeout in milliseconds (default: 5000)",
 				},
+				"databaseId": map[string]interface{}{
+					"type":        "string",
+					"description": "ID of the database to use",
+				},
 			},
-			Required: []string{"statement"},
+			Required: []string{"statement", "databaseId"},
 		},
 		Handler: handleExecute,
 	}
@@ -42,15 +46,27 @@ func createExecuteTool() *tools.Tool {
 
 // handleExecute handles the execute tool execution
 func handleExecute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Check if database is initialized
-	if dbInstance == nil {
-		return nil, fmt.Errorf("database not initialized")
+	// Check if database manager is initialized
+	if dbManager == nil {
+		return nil, fmt.Errorf("database manager not initialized")
 	}
 
 	// Extract parameters
 	statement, ok := getStringParam(params, "statement")
 	if !ok {
 		return nil, fmt.Errorf("statement parameter is required")
+	}
+
+	// Get database ID
+	databaseId, ok := getStringParam(params, "databaseId")
+	if !ok {
+		return nil, fmt.Errorf("databaseId parameter is required")
+	}
+
+	// Get database instance
+	db, err := dbManager.GetDB(databaseId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
 
 	// Extract timeout
@@ -75,11 +91,10 @@ func handleExecute(ctx context.Context, params map[string]interface{}) (interfac
 
 	// Execute statement with performance tracking
 	var result interface{}
-	var err error
 
 	result, err = analyzer.TrackQuery(timeoutCtx, statement, statementParams, func() (interface{}, error) {
 		// Execute statement
-		sqlResult, innerErr := dbInstance.Exec(timeoutCtx, statement, statementParams...)
+		sqlResult, innerErr := db.Exec(timeoutCtx, statement, statementParams...)
 		if innerErr != nil {
 			return nil, fmt.Errorf("failed to execute statement: %w", innerErr)
 		}

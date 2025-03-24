@@ -10,7 +10,7 @@ run-stdio: build
 
 # Run the server in SSE mode
 run-sse: clean build
-	./mcp-server -t sse -port 9090
+	./mcp-server -transport sse -port 9090
 
 # Build and run the example client
 client:

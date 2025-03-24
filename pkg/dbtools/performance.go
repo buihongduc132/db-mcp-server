@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/internal/logger"
+	"github.com/FreePeak/db-mcp-server/pkg/db"
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
@@ -301,8 +302,12 @@ func createPerformanceAnalyzerTool() *tools.Tool {
 					"type":        "integer",
 					"description": "Maximum number of results to return (default: 10)",
 				},
+				"databaseId": map[string]interface{}{
+					"type":        "string",
+					"description": "ID of the database to use",
+				},
 			},
-			Required: []string{"action"},
+			Required: []string{"action", "databaseId"},
 		},
 		Handler: handlePerformanceAnalyzer,
 	}
@@ -310,116 +315,157 @@ func createPerformanceAnalyzerTool() *tools.Tool {
 
 // handlePerformanceAnalyzer handles the performance analyzer tool execution
 func handlePerformanceAnalyzer(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Check if database is initialized
-	if dbInstance == nil {
-		return nil, fmt.Errorf("database not initialized")
+	// Check if database manager is initialized
+	if dbManager == nil {
+		return nil, fmt.Errorf("database manager not initialized")
 	}
 
-	// Get the performance analyzer
-	analyzer := GetPerformanceAnalyzer()
-
-	// Extract action parameter
+	// Extract parameters
 	action, ok := getStringParam(params, "action")
 	if !ok {
 		return nil, fmt.Errorf("action parameter is required")
 	}
 
-	// Extract limit parameter (default: 10)
-	limit := 10
-	if limitParam, ok := getIntParam(params, "limit"); ok {
-		limit = limitParam
+	// Get database ID
+	databaseId, ok := getStringParam(params, "databaseId")
+	if !ok {
+		return nil, fmt.Errorf("databaseId parameter is required")
 	}
 
-	// Handle different actions
+	// Get database instance
+	db, err := dbManager.GetDB(databaseId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database: %w", err)
+	}
+
+	// Extract optional parameters
+	query, _ := getStringParam(params, "query")
+	threshold, _ := getIntParam(params, "threshold")
+	limit, hasLimit := getIntParam(params, "limit")
+	if !hasLimit {
+		limit = 10 // Default limit
+	}
+
+	// Create context with timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Execute requested action
 	switch action {
 	case "getSlowQueries":
-		// Get slow queries
-		slowQueries := analyzer.GetSlowQueries()
-
-		// Apply limit
-		if len(slowQueries) > limit {
-			slowQueries = slowQueries[:limit]
-		}
-
-		// Convert to response format
-		result := makeMetricsResponse(slowQueries)
-		return result, nil
-
+		return getSlowQueries(timeoutCtx, db, limit)
 	case "getMetrics":
-		// Get all metrics
-		metrics := analyzer.GetAllMetrics()
-
-		// Apply limit
-		if len(metrics) > limit {
-			metrics = metrics[:limit]
-		}
-
-		// Convert to response format
-		result := makeMetricsResponse(metrics)
-		return result, nil
-
+		return getMetrics(timeoutCtx, db)
 	case "analyzeQuery":
-		// Extract query parameter
-		query, ok := getStringParam(params, "query")
-		if !ok {
+		if query == "" {
 			return nil, fmt.Errorf("query parameter is required for analyzeQuery action")
 		}
-
-		// Analyze the query
-		suggestions := AnalyzeQuery(query)
-
-		return map[string]interface{}{
-			"query":       query,
-			"suggestions": suggestions,
-		}, nil
-
+		return analyzeQuery(timeoutCtx, db, query)
 	case "reset":
-		// Reset metrics
-		analyzer.Reset()
-		return map[string]interface{}{
-			"success": true,
-			"message": "Performance metrics have been reset",
-		}, nil
-
+		return resetPerformanceStats(timeoutCtx, db)
 	case "setThreshold":
-		// Extract threshold parameter
-		thresholdMs, ok := getIntParam(params, "threshold")
-		if !ok {
-			return nil, fmt.Errorf("threshold parameter is required for setThreshold action")
+		if threshold <= 0 {
+			return nil, fmt.Errorf("threshold parameter must be a positive integer")
 		}
-
-		// Set threshold
-		analyzer.SetSlowThreshold(time.Duration(thresholdMs) * time.Millisecond)
-
-		return map[string]interface{}{
-			"success":   true,
-			"message":   "Slow query threshold updated",
-			"threshold": fmt.Sprintf("%dms", thresholdMs),
-		}, nil
-
+		return setSlowQueryThreshold(timeoutCtx, db, threshold)
 	default:
-		return nil, fmt.Errorf("unknown action: %s", action)
+		return nil, fmt.Errorf("invalid action: %s", action)
 	}
 }
 
-// makeMetricsResponse converts metrics to a response format
-func makeMetricsResponse(metrics []*QueryMetrics) map[string]interface{} {
-	queries := make([]map[string]interface{}, len(metrics))
+// getSlowQueries retrieves slow queries from the database
+func getSlowQueries(ctx context.Context, db db.Database, limit int) (interface{}, error) {
+	query := `
+		SELECT query, calls, total_time, mean_time, rows
+		FROM pg_stat_statements
+		WHERE total_time > 0
+		ORDER BY mean_time DESC
+		LIMIT $1
+	`
+	rows, err := db.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get slow queries: %w", err)
+	}
+	defer rows.Close()
 
-	for i, m := range metrics {
-		queries[i] = map[string]interface{}{
-			"query":         m.Query,
-			"count":         m.Count,
-			"avgDuration":   fmt.Sprintf("%.2fms", float64(m.AvgDuration.Microseconds())/1000),
-			"minDuration":   fmt.Sprintf("%.2fms", float64(m.MinDuration.Microseconds())/1000),
-			"maxDuration":   fmt.Sprintf("%.2fms", float64(m.MaxDuration.Microseconds())/1000),
-			"totalDuration": fmt.Sprintf("%.2fms", float64(m.TotalDuration.Microseconds())/1000),
-			"lastExecuted":  m.LastExecuted.Format(time.RFC3339),
-		}
+	results, err := rowsToMaps(rows)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process slow queries: %w", err)
 	}
 
 	return map[string]interface{}{
-		"queries": queries,
-		"count":   len(metrics),
+		"slow_queries": results,
+		"count":        len(results),
+	}, nil
+}
+
+// getMetrics retrieves database performance metrics
+func getMetrics(ctx context.Context, db db.Database) (interface{}, error) {
+	query := `
+		SELECT * FROM pg_stat_database
+		WHERE datname = current_database()
+	`
+	rows, err := db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get metrics: %w", err)
 	}
+	defer rows.Close()
+
+	results, err := rowsToMaps(rows)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process metrics: %w", err)
+	}
+
+	return map[string]interface{}{
+		"metrics": results[0], // Only one row for current database
+	}, nil
+}
+
+// analyzeQuery analyzes a specific query for performance
+func analyzeQuery(ctx context.Context, db db.Database, query string) (interface{}, error) {
+	explainQuery := "EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS) " + query
+	rows, err := db.Query(ctx, explainQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to analyze query: %w", err)
+	}
+	defer rows.Close()
+
+	var plan []byte
+	if !rows.Next() {
+		return nil, fmt.Errorf("no explain plan returned")
+	}
+	if err := rows.Scan(&plan); err != nil {
+		return nil, fmt.Errorf("failed to scan explain plan: %w", err)
+	}
+
+	return map[string]interface{}{
+		"query": query,
+		"plan":  string(plan),
+	}, nil
+}
+
+// resetPerformanceStats resets performance statistics
+func resetPerformanceStats(ctx context.Context, db db.Database) (interface{}, error) {
+	_, err := db.Exec(ctx, "SELECT pg_stat_reset()")
+	if err != nil {
+		return nil, fmt.Errorf("failed to reset performance stats: %w", err)
+	}
+
+	return map[string]interface{}{
+		"status":  "success",
+		"message": "Performance statistics have been reset",
+	}, nil
+}
+
+// setSlowQueryThreshold sets the threshold for slow query logging
+func setSlowQueryThreshold(ctx context.Context, db db.Database, threshold int) (interface{}, error) {
+	_, err := db.Exec(ctx, "ALTER SYSTEM SET log_min_duration_statement = $1", threshold)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set slow query threshold: %w", err)
+	}
+
+	return map[string]interface{}{
+		"status":  "success",
+		"message": fmt.Sprintf("Slow query threshold set to %d ms", threshold),
+	}, nil
 }
