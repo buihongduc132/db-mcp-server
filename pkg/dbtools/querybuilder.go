@@ -3,6 +3,7 @@ package dbtools
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -189,13 +190,13 @@ func handleQueryBuilder(ctx context.Context, params map[string]interface{}) (int
 	}
 
 	// Get database ID
-	databaseId, ok := getStringParam(params, "databaseId")
+	databaseID, ok := getStringParam(params, "databaseId")
 	if !ok {
 		return nil, fmt.Errorf("databaseId parameter is required")
 	}
 
 	// Get database instance
-	db, err := dbManager.GetDB(databaseId)
+	db, err := dbManager.GetDB(databaseID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
@@ -227,11 +228,11 @@ func handleQueryBuilder(ctx context.Context, params map[string]interface{}) (int
 		if err := validateQueryComponents(&components); err != nil {
 			return nil, fmt.Errorf("invalid query components: %w", err)
 		}
-		query, err := buildQueryFromComponents(&components)
+		builtQuery, err := buildQueryFromComponents(&components)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build query: %w", err)
 		}
-		return validateQuery(timeoutCtx, db, query)
+		return validateQuery(timeoutCtx, db, builtQuery)
 	case "analyze":
 		if query == "" {
 			return nil, fmt.Errorf("query parameter is required for analyze action")
@@ -488,7 +489,11 @@ func analyzeQueryPlan(ctx context.Context, db db.Database, query string) (interf
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze query: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("error closing rows: %v", err)
+		}
+	}()
 
 	var plan []byte
 	if !rows.Next() {

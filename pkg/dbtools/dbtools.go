@@ -25,8 +25,7 @@ const (
 
 // Database connection manager (singleton)
 var (
-	dbManager *db.DBManager
-	dbConfig  *db.Config
+	dbManager *db.Manager
 )
 
 // DatabaseConnectionInfo represents detailed information about a database connection

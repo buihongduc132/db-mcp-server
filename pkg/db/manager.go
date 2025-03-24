@@ -23,23 +23,23 @@ type MultiDBConfig struct {
 	Connections []DatabaseConnectionConfig `json:"connections"`
 }
 
-// DBManager manages multiple database connections
-type DBManager struct {
+// Manager manages multiple database connections
+type Manager struct {
 	mu          sync.RWMutex
 	connections map[string]Database
 	configs     map[string]DatabaseConnectionConfig
 }
 
 // NewDBManager creates a new database manager
-func NewDBManager() *DBManager {
-	return &DBManager{
+func NewDBManager() *Manager {
+	return &Manager{
 		connections: make(map[string]Database),
 		configs:     make(map[string]DatabaseConnectionConfig),
 	}
 }
 
 // LoadConfig loads database configurations from JSON
-func (m *DBManager) LoadConfig(configJSON []byte) error {
+func (m *Manager) LoadConfig(configJSON []byte) error {
 	var config MultiDBConfig
 	if err := json.Unmarshal(configJSON, &config); err != nil {
 		return fmt.Errorf("failed to parse config JSON: %w", err)
@@ -60,7 +60,7 @@ func (m *DBManager) LoadConfig(configJSON []byte) error {
 }
 
 // Connect establishes connections to all configured databases
-func (m *DBManager) Connect() error {
+func (m *Manager) Connect() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -91,7 +91,7 @@ func (m *DBManager) Connect() error {
 }
 
 // GetDB returns a database connection by its ID
-func (m *DBManager) GetDB(id string) (Database, error) {
+func (m *Manager) GetDB(id string) (Database, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -103,7 +103,7 @@ func (m *DBManager) GetDB(id string) (Database, error) {
 }
 
 // ListDatabases returns a list of all available database connections
-func (m *DBManager) ListDatabases() []string {
+func (m *Manager) ListDatabases() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -115,7 +115,7 @@ func (m *DBManager) ListDatabases() []string {
 }
 
 // Close closes all database connections
-func (m *DBManager) Close() error {
+func (m *Manager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -135,7 +135,7 @@ func (m *DBManager) Close() error {
 }
 
 // Ping checks if all database connections are alive
-func (m *DBManager) Ping(ctx context.Context) map[string]error {
+func (m *Manager) Ping(ctx context.Context) map[string]error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

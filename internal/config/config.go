@@ -7,8 +7,9 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/FreePeak/db-mcp-server/pkg/db"
 	"github.com/joho/godotenv"
+
+	"github.com/FreePeak/db-mcp-server/pkg/db"
 )
 
 // Config holds all server configuration

@@ -120,8 +120,8 @@ func TestLoadConfig(t *testing.T) {
 
 	defer func() {
 		for _, v := range vars {
-			if err := os.Unsetenv(v); err != nil {
-				t.Logf("Failed to unset %s: %v", v, err)
+			if cleanupErr := os.Unsetenv(v); cleanupErr != nil {
+				t.Logf("Failed to unset %s: %v", v, cleanupErr)
 			}
 		}
 	}()

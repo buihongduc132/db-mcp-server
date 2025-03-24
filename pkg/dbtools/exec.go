@@ -10,6 +10,8 @@ import (
 )
 
 // createExecuteTool creates a tool for executing database statements that don't return rows
+//
+//nolint:unused // Retained for future use
 func createExecuteTool() *tools.Tool {
 	return &tools.Tool{
 		Name:        "dbExecute",
@@ -58,13 +60,13 @@ func handleExecute(ctx context.Context, params map[string]interface{}) (interfac
 	}
 
 	// Get database ID
-	databaseId, ok := getStringParam(params, "databaseId")
+	databaseID, ok := getStringParam(params, "databaseId")
 	if !ok {
 		return nil, fmt.Errorf("databaseId parameter is required")
 	}
 
 	// Get database instance
-	db, err := dbManager.GetDB(databaseId)
+	db, err := dbManager.GetDB(databaseID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
@@ -128,6 +130,8 @@ func handleExecute(ctx context.Context, params map[string]interface{}) (interfac
 }
 
 // createMockExecuteTool creates a mock version of the execute tool that works without database connection
+//
+//nolint:unused // Retained for future use
 func createMockExecuteTool() *tools.Tool {
 	// Create the tool using the same schema as the real execute tool
 	tool := createExecuteTool()
@@ -139,6 +143,8 @@ func createMockExecuteTool() *tools.Tool {
 }
 
 // handleMockExecute is a mock implementation of the execute handler
+//
+//nolint:unused // Retained for future use
 func handleMockExecute(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 	// Extract parameters
 	statement, ok := getStringParam(params, "statement")

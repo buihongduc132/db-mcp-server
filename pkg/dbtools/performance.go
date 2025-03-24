@@ -3,6 +3,7 @@ package dbtools
 import (
 	"context"
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
@@ -277,6 +278,8 @@ func GetPerformanceAnalyzer() *PerformanceAnalyzer {
 }
 
 // createPerformanceAnalyzerTool creates a tool for analyzing database performance
+//
+//nolint:unused // Retained for future use
 func createPerformanceAnalyzerTool() *tools.Tool {
 	return &tools.Tool{
 		Name:        "dbPerformanceAnalyzer",
@@ -302,12 +305,12 @@ func createPerformanceAnalyzerTool() *tools.Tool {
 					"type":        "integer",
 					"description": "Maximum number of results to return (default: 10)",
 				},
-				"databaseId": map[string]interface{}{
+				"databaseID": map[string]interface{}{
 					"type":        "string",
 					"description": "ID of the database to use",
 				},
 			},
-			Required: []string{"action", "databaseId"},
+			Required: []string{"action", "databaseID"},
 		},
 		Handler: handlePerformanceAnalyzer,
 	}
@@ -327,13 +330,13 @@ func handlePerformanceAnalyzer(ctx context.Context, params map[string]interface{
 	}
 
 	// Get database ID
-	databaseId, ok := getStringParam(params, "databaseId")
+	databaseID, ok := getStringParam(params, "databaseID")
 	if !ok {
-		return nil, fmt.Errorf("databaseId parameter is required")
+		return nil, fmt.Errorf("databaseID parameter is required")
 	}
 
 	// Get database instance
-	db, err := dbManager.GetDB(databaseId)
+	db, err := dbManager.GetDB(databaseID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
@@ -386,7 +389,11 @@ func getSlowQueries(ctx context.Context, db db.Database, limit int) (interface{}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get slow queries: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("error closing rows: %v", closeErr)
+		}
+	}()
 
 	results, err := rowsToMaps(rows)
 	if err != nil {
@@ -409,7 +416,11 @@ func getMetrics(ctx context.Context, db db.Database) (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get metrics: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("error closing rows: %v", closeErr)
+		}
+	}()
 
 	results, err := rowsToMaps(rows)
 	if err != nil {
@@ -428,7 +439,11 @@ func analyzeQuery(ctx context.Context, db db.Database, query string) (interface{
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze query: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("error closing rows: %v", err)
+		}
+	}()
 
 	var plan []byte
 	if !rows.Next() {

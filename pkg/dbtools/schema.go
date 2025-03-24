@@ -3,6 +3,7 @@ package dbtools
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/pkg/db"
@@ -31,12 +32,12 @@ func createSchemaExplorerTool() *tools.Tool {
 					"type":        "integer",
 					"description": "Query timeout in milliseconds (default: 10000)",
 				},
-				"databaseId": map[string]interface{}{
+				"databaseID": map[string]interface{}{
 					"type":        "string",
 					"description": "ID of the database to use",
 				},
 			},
-			Required: []string{"component", "databaseId"},
+			Required: []string{"component", "databaseID"},
 		},
 		Handler: handleSchemaExplorer,
 	}
@@ -56,13 +57,13 @@ func handleSchemaExplorer(ctx context.Context, params map[string]interface{}) (i
 	}
 
 	// Get database ID
-	databaseId, ok := getStringParam(params, "databaseId")
+	databaseID, ok := getStringParam(params, "databaseID")
 	if !ok {
-		return nil, fmt.Errorf("databaseId parameter is required")
+		return nil, fmt.Errorf("databaseID parameter is required")
 	}
 
 	// Get database instance
-	db, err := dbManager.GetDB(databaseId)
+	db, err := dbManager.GetDB(databaseID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
@@ -105,7 +106,11 @@ func getTables(ctx context.Context, db db.Database) (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tables: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("error closing rows: %v", closeErr)
+		}
+	}()
 
 	// Convert rows to maps
 	results, err := rowsToMaps(rows)
@@ -128,9 +133,13 @@ func getColumns(ctx context.Context, db db.Database, table string) (interface{},
 	`
 	rows, err := db.Query(ctx, query, table)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get columns: %w", err)
+		return nil, fmt.Errorf("failed to get columns for table %s: %w", table, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("error closing rows: %v", closeErr)
+		}
+	}()
 
 	// Convert rows to maps
 	results, err := rowsToMaps(rows)
@@ -174,9 +183,13 @@ func getRelationships(ctx context.Context, db db.Database, table string) (interf
 
 	rows, err := db.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get relationships: %w", err)
+		return nil, fmt.Errorf("failed to get relationships for table %s: %w", table, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("error closing rows: %v", closeErr)
+		}
+	}()
 
 	// Convert rows to maps
 	results, err := rowsToMaps(rows)
@@ -203,17 +216,17 @@ func getFullSchema(ctx context.Context, db db.Database) (interface{}, error) {
 	fullSchema := make(map[string]interface{})
 	for _, tableInfo := range tables {
 		tableName := tableInfo["table_name"].(string)
-		columnsResult, err := getColumns(ctx, db, tableName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get columns for table %s: %w", tableName, err)
+		columnsResult, columnsErr := getColumns(ctx, db, tableName)
+		if columnsErr != nil {
+			return nil, fmt.Errorf("failed to get columns for table %s: %w", tableName, columnsErr)
 		}
 		fullSchema[tableName] = columnsResult
 	}
 
 	// Get all relationships
-	relationships, err := getRelationships(ctx, db, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get relationships: %w", err)
+	relationships, relErr := getRelationships(ctx, db, "")
+	if relErr != nil {
+		return nil, fmt.Errorf("failed to get relationships: %w", relErr)
 	}
 
 	return map[string]interface{}{

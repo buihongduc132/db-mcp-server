@@ -3,6 +3,7 @@ package dbtools
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 )
 
 // createQueryTool creates a tool for executing database queries
+//
+//nolint:unused // Retained for future use
 func createQueryTool() *tools.Tool {
 	return &tools.Tool{
 		Name:        "dbQuery",
@@ -58,13 +61,13 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 	}
 
 	// Get database ID
-	databaseId, ok := getStringParam(params, "databaseId")
+	databaseID, ok := getStringParam(params, "databaseId")
 	if !ok {
 		return nil, fmt.Errorf("databaseId parameter is required")
 	}
 
 	// Get database instance
-	db, err := dbManager.GetDB(databaseId)
+	db, err := dbManager.GetDB(databaseID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
@@ -98,7 +101,11 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 		if innerErr != nil {
 			return nil, fmt.Errorf("failed to execute query: %w", innerErr)
 		}
-		defer rows.Close()
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				log.Printf("error closing rows: %v", closeErr)
+			}
+		}()
 
 		// Convert rows to maps
 		results, innerErr := rowsToMaps(rows)
@@ -121,7 +128,9 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 	return result, nil
 }
 
-// createMockQueryTool creates a mock version of the query tool that works without database connection
+// createMockQueryTool creates a mock version of the query tool
+//
+//nolint:unused // Retained for future use
 func createMockQueryTool() *tools.Tool {
 	// Create the tool using the same schema as the real query tool
 	tool := createQueryTool()
@@ -133,6 +142,8 @@ func createMockQueryTool() *tools.Tool {
 }
 
 // handleMockQuery is a mock implementation of the query handler
+//
+//nolint:unused // Retained for future use
 func handleMockQuery(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 	// Extract parameters
 	query, ok := getStringParam(params, "query")
@@ -168,7 +179,9 @@ func handleMockQuery(ctx context.Context, params map[string]interface{}) (interf
 	}, nil
 }
 
-// containsIgnoreCase checks if a string contains a substring (case-insensitive)
+// containsIgnoreCase checks if a string contains a substring, ignoring case
+//
+//nolint:unused // Retained for future use
 func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

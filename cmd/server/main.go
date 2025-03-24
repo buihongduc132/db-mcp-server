@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -92,7 +91,7 @@ func (s *Server) startStdioServer() error {
 
 func main() {
 	// Initialize random number generator
-	rand.Seed(time.Now().UnixNano())
+	// As of Go 1.20, rand.Seed is no longer necessary
 
 	// Parse command line flags
 	transportMode := flag.String("transport", "", "Transport mode (sse or stdio)")
@@ -188,6 +187,9 @@ func main() {
 	}
 }
 
+// startSSEServer starts the server using Server-Sent Events transport
+//
+//nolint:unused // Retained for future use
 func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHandler *mcp.Handler) error {
 	// Create SSE transport
 	basePath := fmt.Sprintf("http://localhost:%d", cfg.ServerPort)
@@ -242,6 +244,9 @@ func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHand
 	return nil
 }
 
+// registerDatabaseTools registers database tools with the MCP tool registry
+//
+//nolint:unused // Retained for future use
 func registerDatabaseTools(toolRegistry *tools.Registry, cfg *config.Config) error {
 	// Initialize database connections
 	if err := dbtools.InitDatabase(cfg); err != nil {
