@@ -68,7 +68,8 @@ func TestLoadConfig(t *testing.T) {
 	}
 
 	// Test with default values (no .env file and no environment variables)
-	config := LoadConfig()
+	config, err := LoadConfig()
+	assert.NoError(t, err)
 	assert.Equal(t, 9090, config.ServerPort)
 	assert.Equal(t, "sse", config.TransportMode)
 	assert.Equal(t, "info", config.LogLevel)
@@ -80,7 +81,7 @@ func TestLoadConfig(t *testing.T) {
 	assert.Equal(t, "", config.DBConfig.Name)
 
 	// Test with custom environment variables
-	err := os.Setenv("SERVER_PORT", "8080")
+	err = os.Setenv("SERVER_PORT", "8080")
 	if err != nil {
 		t.Fatalf("Failed to set SERVER_PORT: %v", err)
 	}
@@ -125,7 +126,8 @@ func TestLoadConfig(t *testing.T) {
 		}
 	}()
 
-	config = LoadConfig()
+	config, err = LoadConfig()
+	assert.NoError(t, err)
 	assert.Equal(t, 8080, config.ServerPort)
 	assert.Equal(t, "stdio", config.TransportMode)
 	assert.Equal(t, "debug", config.LogLevel)

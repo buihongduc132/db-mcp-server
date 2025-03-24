@@ -262,6 +262,119 @@ The server includes AI-optimized database tools that provide rich context and ca
 | `dbSchema` | Auto-discovers database structure and relationships | Provides AI with complete schema context for reasoning |
 | `dbQueryBuilder` | Visual SQL query construction with syntax validation | Helps AI create syntactically correct queries |
 | `dbPerformanceAnalyzer` | Identifies slow queries and provides optimization suggestions | Enables AI to suggest performance improvements |
+| `showConnectedDatabases` | Shows information about all connected databases | Enables AI to understand available database connections and their status |
+
+### Multiple Database Support
+
+DB MCP Server supports connecting to multiple databases simultaneously, allowing AI agents to work across different database systems in a unified way. Each database connection is identified by a unique ID that can be referenced when using database tools.
+
+#### Configuring Multiple Databases
+
+Configure multiple database connections in your `.env` file or environment variables:
+
+```
+# Multiple Database Configuration
+DB_CONNECTIONS=[
+  {
+    "id": "mysql1",
+    "type": "mysql",
+    "host": "localhost",
+    "port": 3306,
+    "user": "user1",
+    "password": "password1",
+    "database": "db1"
+  },
+  {
+    "id": "postgres1",
+    "type": "postgres",
+    "host": "localhost",
+    "port": 5432,
+    "user": "user2",
+    "password": "password2",
+    "database": "db2"
+  },
+  {
+    "id": "mysql2",
+    "type": "mysql",
+    "host": "localhost",
+    "port": 3307,
+    "user": "user3",
+    "password": "password3",
+    "database": "db3"
+  }
+]
+```
+
+#### Viewing Connected Databases
+
+Use the `showConnectedDatabases` tool to see all connected databases with their status and connection information:
+
+```json
+// Get information about all connected databases
+{
+  "name": "showConnectedDatabases"
+}
+```
+
+Example response:
+
+```json
+[
+  {
+    "id": "mysql1",
+    "type": "mysql",
+    "host": "localhost",
+    "port": 3306,
+    "database": "db1",
+    "status": "connected",
+    "latency": "1.2ms"
+  },
+  {
+    "id": "postgres1",
+    "type": "postgres",
+    "host": "localhost",
+    "port": 5432,
+    "database": "db2",
+    "status": "connected",
+    "latency": "0.8ms"
+  }
+]
+```
+
+#### Specifying Database for Operations
+
+When using database tools, you can specify which database to use with the `database` parameter:
+
+```json
+// Query a specific database by ID
+{
+  "name": "dbQuery",
+  "arguments": {
+    "database": "postgres1",
+    "query": "SELECT * FROM users LIMIT 10"
+  }
+}
+
+// Execute statement on a specific database
+{
+  "name": "dbExecute",
+  "arguments": {
+    "database": "mysql2",
+    "statement": "UPDATE products SET stock = stock - 1 WHERE id = 5"
+  }
+}
+
+// Get schema from a specific database
+{
+  "name": "dbSchema",
+  "arguments": {
+    "database": "mysql1",
+    "component": "tables"
+  }
+}
+```
+
+When the `database` parameter is omitted, the server will use the default database connection.
 
 ### Database Schema Explorer Tool
 
