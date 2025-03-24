@@ -73,17 +73,37 @@ cd db-mcp-server
 cp .env.example .env
 # Edit .env with your configuration
 
-# Option 1: Build and run locally
+# Option 1: Build and run locally with SSE transport (default)
 make build
 ./mcp-server
 
-# Option 2: Using Docker
+# Option 2: Build and run with STDIO transport
+make build
+./mcp-server -t stdio
+
+# Option 3: Using Docker
 docker build -t db-mcp-server .
 docker run -p 9090:9090 db-mcp-server
 
-# Option 3: Using Docker Compose (with MySQL)
+# Option 4: Using Docker Compose (with MySQL)
 docker-compose up -d
 ```
+
+### Transport Modes
+
+The server supports two transport modes:
+
+1. **SSE (Server-Sent Events)** - Default mode for browser and HTTP clients
+   ```bash
+   ./mcp-server -t sse
+   ```
+
+2. **STDIO (Standard Input/Output)** - For command-line tools and integrations
+   ```bash
+   ./mcp-server -t stdio
+   ```
+   
+For STDIO mode, see the [examples directory](./examples) for usage examples.
 
 ### Docker
 
@@ -173,54 +193,6 @@ The MCP Server enhances AI assistant capabilities with:
 
 # Request complex data operations
 "Help me create a transaction that updates inventory levels when an order is placed"
-```
-
-### Custom Tool Registration (Server-side)
-
-```go
-// Go example
-package main
-
-import (
-	"context"
-	"db-mcpserver/internal/mcp"
-)
-
-func main() {
-	// Create a custom database tool that AI agents can discover and use
-	queryTool := &mcp.Tool{
-		Name:        "dbQuery",
-		Description: "Executes read-only SQL queries with parameterized inputs",
-		InputSchema: mcp.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"query": {
-					"type":        "string",
-					"description": "SQL query to execute",
-				},
-				"params": {
-					"type":        "array",
-					"description": "Query parameters",
-					"items": map[string]interface{}{
-						"type": "any",
-					},
-				},
-				"timeout": {
-					"type":        "integer",
-					"description": "Query timeout in milliseconds (optional)",
-				},
-			},
-			Required: []string{"query"},
-		},
-		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-			// Implementation...
-			return result, nil
-		},
-	}
-
-	// Register the tool
-	toolRegistry.RegisterTool(queryTool)
-}
 ```
 
 ## 📚 Documentation

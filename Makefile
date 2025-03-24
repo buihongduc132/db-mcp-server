@@ -6,11 +6,11 @@ build:
 
 # Run the server in stdio mode
 run-stdio: build
-	./mcp-server --transport stdio
+	./mcp-server -t stdio
 
 # Run the server in SSE mode
 run-sse: clean build
-	./mcp-server -transport sse -port 9090
+	./mcp-server -t sse -port 9090
 
 # Build and run the example client
 client:

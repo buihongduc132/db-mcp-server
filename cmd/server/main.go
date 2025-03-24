@@ -82,11 +82,36 @@ func (s *Server) startSSEServer() error {
 
 func (s *Server) startStdioServer() error {
 	// Create MCP handler with the tool registry
-	_ = mcp.NewHandler(s.registry)
+	mcpHandler := mcp.NewHandler(s.registry)
 
-	// Start server using stdio
-	logger.Info("stdio transport not implemented yet")
-	return fmt.Errorf("stdio transport not implemented")
+	// Create STDIO transport
+	stdioTransport := transport.NewStdioTransport(s.sessionManager)
+
+	// Register MCP handler with transport
+	for method, handler := range mcpHandler.GetAllMethodHandlers() {
+		stdioTransport.RegisterMethodHandler(method, handler)
+	}
+
+	// Start the transport
+	if err := stdioTransport.Start(); err != nil {
+		return fmt.Errorf("failed to start STDIO transport: %w", err)
+	}
+
+	// Log that we've started
+	logger.Info("STDIO transport started, waiting for requests on stdin...")
+
+	// Create a channel for OS signals
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	// Wait for a signal
+	<-sigs
+	logger.Info("Received shutdown signal, stopping server...")
+
+	// Stop the transport
+	stdioTransport.Stop()
+
+	return nil
 }
 
 func main() {
@@ -94,7 +119,7 @@ func main() {
 	// As of Go 1.20, rand.Seed is no longer necessary
 
 	// Parse command line flags
-	transportMode := flag.String("transport", "", "Transport mode (sse or stdio)")
+	transportMode := flag.String("t", "", "Transport mode (sse or stdio)")
 	serverPort := flag.Int("port", 0, "Server port")
 	configFile := flag.String("config", "", "Path to database configuration file")
 	flag.Parse()
@@ -106,7 +131,12 @@ func main() {
 	}
 
 	// Initialize logger with debug level
-	logger.Initialize("debug")
+	if cfg.TransportMode == "stdio" {
+		// In STDIO mode, explicitly redirect logs to stderr to avoid mixing with JSON responses
+		logger.InitializeWithWriter("debug", os.Stderr)
+	} else {
+		logger.Initialize("debug")
+	}
 
 	// Override configuration with command line flags if provided
 	if *transportMode != "" {
@@ -134,31 +164,39 @@ func main() {
 	registry := tools.NewRegistry()
 
 	// Initialize database connections
-	if err := dbtools.InitDatabase(cfg); err != nil {
-		log.Fatalf("Failed to initialize database connections: %v", err)
+	var dbInitError error
+	if cfg.TransportMode == "stdio" && os.Getenv("SKIP_DB") == "true" {
+		log.Printf("Skipping database initialization for STDIO mode with SKIP_DB=true")
+	} else {
+		dbInitError = dbtools.InitDatabase(cfg)
+		if dbInitError != nil {
+			log.Printf("Warning: Failed to initialize database connections: %v", dbInitError)
+		}
 	}
 
-	// Register database tools
+	// Register database tools (even if db init failed, to allow testing)
 	if err := dbtools.RegisterDatabaseTools(registry); err != nil {
 		log.Fatalf("Failed to register database tools: %v", err)
 	}
 
-	// Verify database connections
-	ctx := context.Background()
-	dbIDs := dbtools.ListDatabases()
-	if len(dbIDs) == 0 {
-		log.Printf("Warning: No database connections configured")
-	} else {
-		for _, dbID := range dbIDs {
-			db, err := dbtools.GetDatabase(dbID)
-			if err != nil {
-				log.Printf("Warning: Failed to get database %s: %v", dbID, err)
-				continue
-			}
-			if err := db.Ping(ctx); err != nil {
-				log.Printf("Warning: Failed to ping database %s: %v", dbID, err)
-			} else {
-				log.Printf("Successfully connected to database %s", dbID)
+	// Verify database connections only if init didn't fail
+	if dbInitError == nil {
+		ctx := context.Background()
+		dbIDs := dbtools.ListDatabases()
+		if len(dbIDs) == 0 {
+			log.Printf("Warning: No database connections configured")
+		} else {
+			for _, dbID := range dbIDs {
+				db, err := dbtools.GetDatabase(dbID)
+				if err != nil {
+					log.Printf("Warning: Failed to get database %s: %v", dbID, err)
+					continue
+				}
+				if err := db.Ping(ctx); err != nil {
+					log.Printf("Warning: Failed to ping database %s: %v", dbID, err)
+				} else {
+					log.Printf("Successfully connected to database %s", dbID)
+				}
 			}
 		}
 	}
