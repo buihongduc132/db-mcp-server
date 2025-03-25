@@ -64,14 +64,14 @@ func createTransactionTool() *tools.Tool {
 				},
 				"transactionId": map[string]interface{}{
 					"type":        "string",
-					"description": "Transaction ID (returned from begin, required for all other actions)",
+					"description": "Transaction ID (required for commit, rollback, and execute actions)",
 				},
-				"databaseId": map[string]interface{}{
+				"database": map[string]interface{}{
 					"type":        "string",
-					"description": "ID of the database to use",
+					"description": "Database ID to use (optional if only one database is configured)",
 				},
 			},
-			Required: []string{"action", "databaseId"},
+			Required: []string{"action", "database"},
 		},
 		Handler: handleTransaction,
 	}
@@ -91,9 +91,9 @@ func handleTransaction(ctx context.Context, params map[string]interface{}) (inte
 	}
 
 	// Get database ID
-	databaseID, ok := getStringParam(params, "databaseId")
+	databaseID, ok := getStringParam(params, "database")
 	if !ok {
-		return nil, fmt.Errorf("databaseId parameter is required")
+		return nil, fmt.Errorf("database parameter is required")
 	}
 
 	// Get database instance

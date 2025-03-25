@@ -36,12 +36,12 @@ func createQueryTool() *tools.Tool {
 					"type":        "integer",
 					"description": "Query timeout in milliseconds (default: 5000)",
 				},
-				"databaseId": map[string]interface{}{
+				"database": map[string]interface{}{
 					"type":        "string",
-					"description": "ID of the database to use",
+					"description": "Database ID to use (optional if only one database is configured)",
 				},
 			},
-			Required: []string{"query", "databaseId"},
+			Required: []string{"query", "database"},
 		},
 		Handler: handleQuery,
 	}
@@ -61,9 +61,9 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 	}
 
 	// Get database ID
-	databaseID, ok := getStringParam(params, "databaseId")
+	databaseID, ok := getStringParam(params, "database")
 	if !ok {
-		return nil, fmt.Errorf("databaseId parameter is required")
+		return nil, fmt.Errorf("database parameter is required")
 	}
 
 	// Get database instance

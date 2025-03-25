@@ -295,7 +295,7 @@ func createPerformanceAnalyzerTool() *tools.Tool {
 				},
 				"query": map[string]interface{}{
 					"type":        "string",
-					"description": "SQL query to analyze (required for analyzeQuery action)",
+					"description": "SQL query to analyze",
 				},
 				"threshold": map[string]interface{}{
 					"type":        "integer",
@@ -305,12 +305,12 @@ func createPerformanceAnalyzerTool() *tools.Tool {
 					"type":        "integer",
 					"description": "Maximum number of results to return (default: 10)",
 				},
-				"databaseID": map[string]interface{}{
+				"database": map[string]interface{}{
 					"type":        "string",
-					"description": "ID of the database to use",
+					"description": "Database ID to use (optional if only one database is configured)",
 				},
 			},
-			Required: []string{"action", "databaseID"},
+			Required: []string{"query", "database"},
 		},
 		Handler: handlePerformanceAnalyzer,
 	}
@@ -330,9 +330,9 @@ func handlePerformanceAnalyzer(ctx context.Context, params map[string]interface{
 	}
 
 	// Get database ID
-	databaseID, ok := getStringParam(params, "databaseID")
+	databaseID, ok := getStringParam(params, "database")
 	if !ok {
-		return nil, fmt.Errorf("databaseID parameter is required")
+		return nil, fmt.Errorf("database parameter is required")
 	}
 
 	// Get database instance

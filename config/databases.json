@@ -26,6 +26,15 @@
       "user": "user2",
       "password": "password2",
       "name": "db2"
+    },
+    {
+      "id": "cashflow_db",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 3306,
+      "user": "iamrevisto",
+      "password": "password",
+      "name": "revisto"
     }
   ]
 } 

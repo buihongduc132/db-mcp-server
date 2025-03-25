@@ -241,40 +241,46 @@ The server includes AI-optimized database tools that provide rich context and ca
 DB MCP Server supports connecting to multiple databases simultaneously, allowing AI agents to work across different database systems in a unified way. Each database connection is identified by a unique ID that can be referenced when using database tools.
 
 #### Configuring Multiple Databases
-
-Configure multiple database connections in your `.env` file or environment variables:
+In your .env file
+```
+# Multi-Database Configuration
+DB_CONFIG_FILE=config/databases.json
+```
+Configure multiple database connections in your `db-mcp-server/config/databases.json` file or environment variables:
 
 ```
 # Multiple Database Configuration
-DB_CONNECTIONS=[
-  {
-    "id": "mysql1",
-    "type": "mysql",
-    "host": "localhost",
-    "port": 3306,
-    "user": "user1",
-    "password": "password1",
-    "database": "db1"
-  },
-  {
-    "id": "postgres1",
-    "type": "postgres",
-    "host": "localhost",
-    "port": 5432,
-    "user": "user2",
-    "password": "password2",
-    "database": "db2"
-  },
-  {
-    "id": "mysql2",
-    "type": "mysql",
-    "host": "localhost",
-    "port": 3307,
-    "user": "user3",
-    "password": "password3",
-    "database": "db3"
-  }
-]
+{
+  "connections": [
+    {
+      "id": "mysql1",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 13306,
+      "user": "user1",
+      "password": "password1",
+      "name": "db1"
+    },
+    {
+      "id": "mysql2",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 13307,
+      "user": "user3",
+      "password": "password3",
+      "name": "db3"
+    },
+    {
+      "id": "postgres1",
+      "type": "postgres",
+      "host": "localhost",
+      "port": 15432,
+      "user": "user2",
+      "password": "password2",
+      "name": "db2"
+    }
+  ]
+} 
 ```
 
 #### Viewing Connected Databases
@@ -315,14 +321,14 @@ Example response:
 
 #### Specifying Database for Operations
 
-When using database tools, you must specify which database to use with the `databaseId` parameter (not `database`):
+When using database tools, you must specify which database to use with the `database` parameter:
 
 ```json
 // Query a specific database by ID
 {
   "name": "dbQuery",
   "arguments": {
-    "databaseId": "postgres1",
+    "database": "postgres1",
     "query": "SELECT * FROM users LIMIT 10"
   }
 }
@@ -331,7 +337,7 @@ When using database tools, you must specify which database to use with the `data
 {
   "name": "dbExecute",
   "arguments": {
-    "databaseId": "mysql2",
+    "database": "mysql2",
     "statement": "UPDATE products SET stock = stock - 1 WHERE id = 5"
   }
 }
@@ -340,13 +346,13 @@ When using database tools, you must specify which database to use with the `data
 {
   "name": "dbSchema",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "component": "tables"
   }
 }
 ```
 
-> **⚠️ IMPORTANT**: Always use `databaseId` (not `database`) as the parameter name when specifying which database to use. This is required for all database operation tools.
+> **Note**: Always use `database` as the parameter name when specifying which database to use. This is required for all database operation tools.
 
 If your configuration has only one database connection, you must still provide the database ID that matches the ID in your configuration.
 
@@ -359,7 +365,7 @@ The MCP Server includes an AI-aware Database Schema Explorer tool (`dbSchema`) t
 {
   "name": "dbSchema",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "component": "tables"
   }
 }
@@ -368,7 +374,7 @@ The MCP Server includes an AI-aware Database Schema Explorer tool (`dbSchema`) t
 {
   "name": "dbSchema",
   "arguments": {
-    "databaseId": "postgres1",
+    "database": "postgres1",
     "component": "columns",
     "table": "users"
   }
@@ -378,7 +384,7 @@ The MCP Server includes an AI-aware Database Schema Explorer tool (`dbSchema`) t
 {
   "name": "dbSchema",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "component": "relationships",
     "table": "orders"
   }
@@ -388,7 +394,7 @@ The MCP Server includes an AI-aware Database Schema Explorer tool (`dbSchema`) t
 {
   "name": "dbSchema",
   "arguments": {
-    "databaseId": "postgres1",
+    "database": "postgres1",
     "component": "full"
   }
 }
@@ -405,7 +411,7 @@ The MCP Server includes a powerful Visual Query Builder tool (`dbQueryBuilder`) 
 {
   "name": "dbQueryBuilder",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "action": "validate",
     "query": "SELECT * FROM users WHERE status = 'active'"
   }
@@ -415,7 +421,7 @@ The MCP Server includes a powerful Visual Query Builder tool (`dbQueryBuilder`) 
 {
   "name": "dbQueryBuilder",
   "arguments": {
-    "databaseId": "postgres1",
+    "database": "postgres1",
     "action": "build",
     "components": {
       "select": ["id", "name", "email"],
@@ -442,7 +448,7 @@ The MCP Server includes a powerful Visual Query Builder tool (`dbQueryBuilder`) 
 {
   "name": "dbQueryBuilder",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "action": "analyze",
     "query": "SELECT u.*, o.* FROM users u JOIN orders o ON u.id = o.user_id WHERE u.status = 'active' AND o.created_at > '2023-01-01'"
   }
@@ -494,7 +500,7 @@ The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnal
 {
   "name": "dbPerformanceAnalyzer",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "action": "getSlowQueries",
     "limit": 5
   }
@@ -504,7 +510,7 @@ The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnal
 {
   "name": "dbPerformanceAnalyzer",
   "arguments": {
-    "databaseId": "postgres1",
+    "database": "postgres1",
     "action": "getMetrics",
     "limit": 10
   }
@@ -514,7 +520,7 @@ The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnal
 {
   "name": "dbPerformanceAnalyzer",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "action": "analyzeQuery",
     "query": "SELECT * FROM orders JOIN users ON orders.user_id = users.id WHERE orders.status = 'pending'"
   }
@@ -524,7 +530,7 @@ The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnal
 {
   "name": "dbPerformanceAnalyzer",
   "arguments": {
-    "databaseId": "postgres1",
+    "database": "postgres1",
     "action": "reset"
   }
 }
@@ -533,7 +539,7 @@ The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnal
 {
   "name": "dbPerformanceAnalyzer",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "action": "setThreshold",
     "threshold": 300
   }
@@ -599,7 +605,7 @@ For operations that require transaction support, use the `dbTransaction` tool:
 {
   "name": "dbTransaction",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "action": "begin",
     "readOnly": false
   }
@@ -609,7 +615,7 @@ For operations that require transaction support, use the `dbTransaction` tool:
 {
   "name": "dbTransaction",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "action": "execute",
     "transactionId": "tx-1684785421293", // ID returned from the begin operation
     "statement": "INSERT INTO orders (customer_id, amount) VALUES (?, ?)",
@@ -621,7 +627,7 @@ For operations that require transaction support, use the `dbTransaction` tool:
 {
   "name": "dbTransaction",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "action": "commit",
     "transactionId": "tx-1684785421293"
   }
@@ -631,7 +637,7 @@ For operations that require transaction support, use the `dbTransaction` tool:
 {
   "name": "dbTransaction",
   "arguments": {
-    "databaseId": "mysql1",
+    "database": "mysql1",
     "action": "rollback",
     "transactionId": "tx-1684785421293"
   }

@@ -26,18 +26,18 @@ func createSchemaExplorerTool() *tools.Tool {
 				},
 				"table": map[string]interface{}{
 					"type":        "string",
-					"description": "Table name (required when component is 'columns' and optional for 'relationships')",
+					"description": "Table name to explore (optional, leave empty for all tables)",
 				},
 				"timeout": map[string]interface{}{
 					"type":        "integer",
 					"description": "Query timeout in milliseconds (default: 10000)",
 				},
-				"databaseID": map[string]interface{}{
+				"database": map[string]interface{}{
 					"type":        "string",
-					"description": "ID of the database to use",
+					"description": "Database ID to use (optional if only one database is configured)",
 				},
 			},
-			Required: []string{"component", "databaseID"},
+			Required: []string{"component", "database"},
 		},
 		Handler: handleSchemaExplorer,
 	}
@@ -57,9 +57,9 @@ func handleSchemaExplorer(ctx context.Context, params map[string]interface{}) (i
 	}
 
 	// Get database ID
-	databaseID, ok := getStringParam(params, "databaseID")
+	databaseID, ok := getStringParam(params, "database")
 	if !ok {
-		return nil, fmt.Errorf("databaseID parameter is required")
+		return nil, fmt.Errorf("database parameter is required")
 	}
 
 	// Get database instance
