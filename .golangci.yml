@@ -16,7 +16,6 @@ linters:
     - goimports
     - misspell
     - revive
-    - copyloopvar
 
 linters-settings:
   gofmt:
