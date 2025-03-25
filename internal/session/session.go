@@ -1,33 +1,27 @@
 package session
 
 import (
-	"context"
-	"errors"
-	"net/http"
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/FreePeak/db-mcp-server/internal/logger"
 	"github.com/google/uuid"
 )
 
-// EventCallback is a function that handles SSE events
+// EventCallback is a function that handles a session event
 type EventCallback func(event string, data []byte) error
 
 // Session represents a client session
 type Session struct {
-	ID             string
-	CreatedAt      time.Time
-	LastAccessedAt time.Time
-	Connected      bool
-	Initialized    bool // Flag to track if the client has been initialized
-	ResponseWriter http.ResponseWriter
-	Flusher        http.Flusher
-	EventCallback  EventCallback
-	ctx            context.Context
-	cancel         context.CancelFunc
-	Capabilities   map[string]interface{}
-	Data           map[string]interface{} // Arbitrary session data
-	mu             sync.Mutex
+	ID            string                 // Unique ID for the session
+	Connected     bool                   // Whether the session is connected
+	Initialized   bool                   // Whether the session has been initialized
+	LastActive    time.Time              // Last time the session was active
+	EventCallback EventCallback          // Callback for sending events to the client
+	Capabilities  map[string]interface{} // Client capabilities
+	mu            sync.RWMutex           // Mutex for thread safety
+	closed        bool                   // Whether the session is closed
 }
 
 // Manager manages client sessions
@@ -35,9 +29,6 @@ type Manager struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
 }
-
-// ErrSessionNotFound is returned when a session is not found
-var ErrSessionNotFound = errors.New("session not found")
 
 // NewManager creates a new session manager
 func NewManager() *Manager {
@@ -48,157 +39,92 @@ func NewManager() *Manager {
 
 // CreateSession creates a new session
 func (m *Manager) CreateSession() *Session {
-	ctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	session := &Session{
-		ID:             uuid.NewString(),
-		CreatedAt:      time.Now(),
-		LastAccessedAt: time.Now(),
-		Connected:      false,
-		Capabilities:   make(map[string]interface{}),
-		Data:           make(map[string]interface{}),
-		ctx:            ctx,
-		cancel:         cancel,
+	sessionID := uuid.New().String()
+
+	// Create a new session
+	sess := &Session{
+		ID:           sessionID,
+		LastActive:   time.Now(),
+		Connected:    false,
+		Initialized:  false,
+		Capabilities: make(map[string]interface{}),
+		closed:       false,
 	}
 
-	m.mu.Lock()
-	m.sessions[session.ID] = session
-	m.mu.Unlock()
+	// Add the session to the manager
+	m.sessions[sessionID] = sess
 
-	return session
+	logger.Debug("Created new session: %s", sessionID)
+	return sess
 }
 
 // GetSession gets a session by ID
-func (m *Manager) GetSession(id string) (*Session, error) {
+func (m *Manager) GetSession(id string) (*Session, bool) {
 	m.mu.RLock()
-	session, ok := m.sessions[id]
-	m.mu.RUnlock()
+	defer m.mu.RUnlock()
 
-	if !ok {
-		return nil, ErrSessionNotFound
-	}
-
-	session.mu.Lock()
-	session.LastAccessedAt = time.Now()
-	session.mu.Unlock()
-
-	return session, nil
+	sess, ok := m.sessions[id]
+	return sess, ok
 }
 
 // RemoveSession removes a session by ID
 func (m *Manager) RemoveSession(id string) {
 	m.mu.Lock()
-	session, ok := m.sessions[id]
-	if ok {
-		session.cancel() // Cancel the context when removing the session
+	defer m.mu.Unlock()
+
+	if sess, ok := m.sessions[id]; ok {
+		// Mark session as closed before removing
+		sess.mu.Lock()
+		sess.closed = true
+		sess.Connected = false
+		sess.mu.Unlock()
+
+		// Remove from map
 		delete(m.sessions, id)
+		logger.Debug("Removed session: %s", id)
 	}
-	m.mu.Unlock()
 }
 
-// CleanupSessions removes inactive sessions
+// CleanupSessions removes sessions that have been inactive for the specified duration
 func (m *Manager) CleanupSessions(maxAge time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	now := time.Now()
-	for id, session := range m.sessions {
-		session.mu.Lock()
-		lastAccess := session.LastAccessedAt
-		connected := session.Connected
-		session.mu.Unlock()
+	var removed int
 
-		// Remove disconnected sessions that are older than maxAge
-		if !connected && now.Sub(lastAccess) > maxAge {
-			session.cancel() // Cancel the context when removing the session
+	for id, sess := range m.sessions {
+		sess.mu.RLock()
+		lastActive := sess.LastActive
+		connected := sess.Connected
+		sess.mu.RUnlock()
+
+		// Only remove sessions that are not connected and have been inactive
+		if !connected && now.Sub(lastActive) > maxAge {
+			// Mark as closed
+			sess.mu.Lock()
+			sess.closed = true
+			sess.mu.Unlock()
+
+			// Remove from manager
 			delete(m.sessions, id)
+			removed++
 		}
 	}
-}
 
-// Connect connects a session to an SSE stream
-func (s *Session) Connect(w http.ResponseWriter, r *http.Request) error {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		return errors.New("streaming not supported")
-	}
-
-	// Create a new context that's canceled when the request is done
-	ctx, cancel := context.WithCancel(r.Context())
-
-	s.mu.Lock()
-	// Cancel the old context if it exists
-	if s.cancel != nil {
-		s.cancel()
-	}
-
-	s.ctx = ctx
-	s.cancel = cancel
-	s.ResponseWriter = w
-	s.Flusher = flusher
-	s.Connected = true
-	s.LastAccessedAt = time.Now()
-	s.mu.Unlock()
-
-	// Start a goroutine to monitor for context cancellation
-	go func() {
-		<-ctx.Done()
-		s.Disconnect()
-	}()
-
-	return nil
-}
-
-// SendEvent sends an SSE event to the client
-func (s *Session) SendEvent(event string, data []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if !s.Connected || s.ResponseWriter == nil || s.Flusher == nil {
-		return errors.New("session not connected")
-	}
-
-	if s.EventCallback != nil {
-		return s.EventCallback(event, data)
-	}
-
-	return errors.New("no event callback registered")
-}
-
-// SetCapabilities sets the session capabilities
-func (s *Session) SetCapabilities(capabilities map[string]interface{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for k, v := range capabilities {
-		s.Capabilities[k] = v
+	if removed > 0 {
+		logger.Info("Cleaned up %d inactive sessions", removed)
 	}
 }
 
-// GetCapability gets a session capability
-func (s *Session) GetCapability(key string) (interface{}, bool) {
+// UpdateLastActive updates the last active time for a session
+func (s *Session) UpdateLastActive() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	val, ok := s.Capabilities[key]
-	return val, ok
-}
-
-// Context returns the session context
-func (s *Session) Context() context.Context {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.ctx
-}
-
-// Disconnect disconnects the session
-func (s *Session) Disconnect() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.Connected = false
-	s.ResponseWriter = nil
-	s.Flusher = nil
+	s.LastActive = time.Now()
 }
 
 // SetInitialized marks the session as initialized
@@ -206,36 +132,85 @@ func (s *Session) SetInitialized(initialized bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Initialized = initialized
+	if initialized {
+		logger.Debug("Session %s marked as initialized", s.ID)
+	}
+}
+
+// SetCapabilities sets the client capabilities for the session
+func (s *Session) SetCapabilities(capabilities map[string]interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Capabilities = capabilities
+}
+
+// GetCapabilities gets the client capabilities for the session
+func (s *Session) GetCapabilities() map[string]interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Capabilities
+}
+
+// SendEvent sends an event to the client using the event callback
+func (s *Session) SendEvent(event string, data []byte) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Check if session is closed
+	if s.closed {
+		return fmt.Errorf("session is closed")
+	}
+
+	// Check if callback is set
+	if s.EventCallback == nil {
+		return fmt.Errorf("no event callback registered for session %s", s.ID)
+	}
+
+	// Check if connected
+	if !s.Connected {
+		return fmt.Errorf("session %s is not connected", s.ID)
+	}
+
+	// Update last active time
+	s.LastActive = time.Now()
+
+	// Call the callback
+	err := s.EventCallback(event, data)
+	if err != nil {
+		logger.Error("Failed to send event to client: %v", err)
+		return fmt.Errorf("failed to send event: %w", err)
+	}
+
+	return nil
+}
+
+// GetActiveSessions returns the number of active sessions
+func (m *Manager) GetActiveSessions() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var active int
+	for _, sess := range m.sessions {
+		sess.mu.RLock()
+		if sess.Connected {
+			active++
+		}
+		sess.mu.RUnlock()
+	}
+
+	return active
 }
 
 // IsInitialized returns whether the session has been initialized
 func (s *Session) IsInitialized() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.Initialized
 }
 
-// SetData stores arbitrary data in the session
-func (s *Session) SetData(key string, value interface{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.Data == nil {
-		s.Data = make(map[string]interface{})
-	}
-
-	s.Data[key] = value
-}
-
-// GetData retrieves arbitrary data from the session
-func (s *Session) GetData(key string) (interface{}, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.Data == nil {
-		return nil, false
-	}
-
-	value, ok := s.Data[key]
-	return value, ok
+// IsConnected returns whether the session is connected
+func (s *Session) IsConnected() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Connected
 }

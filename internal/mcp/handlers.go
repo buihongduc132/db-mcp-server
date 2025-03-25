@@ -146,6 +146,10 @@ func (h *Handler) Initialize(req *jsonrpc.Request, sess *session.Session) (inter
 		logger.Info("Client connected: %s v%s",
 			params.ClientInfo["name"],
 			params.ClientInfo["version"])
+
+		// Log all client info for debugging
+		clientInfoJSON, _ := json.Marshal(params.ClientInfo)
+		logger.Debug("Client info: %s", string(clientInfoJSON))
 	}
 
 	// Store client capabilities in session
@@ -176,6 +180,13 @@ func (h *Handler) Initialize(req *jsonrpc.Request, sess *session.Session) (inter
 			if toolsBool, ok := toolsCap.(bool); ok && toolsBool {
 				clientSupportsTools = true
 				logger.Info("Client indicates support for tools")
+			} else if toolsMap, ok := toolsCap.(map[string]interface{}); ok {
+				// Some clients send tools capability as an object
+				clientSupportsTools = true
+				logger.Info("Client indicates support for tools (object format)")
+				// Log tools capabilities details
+				toolsJSON, _ := json.Marshal(toolsMap)
+				logger.Debug("Tools capabilities: %s", string(toolsJSON))
 			} else {
 				logger.Info("Client does not support tools: %v", toolsCap)
 			}
@@ -221,15 +232,29 @@ func (h *Handler) Initialize(req *jsonrpc.Request, sess *session.Session) (inter
 		// Send the notification after a brief delay
 		go func() {
 			// Wait a short time for client to process initialization
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 
-			// Use the new notification method
+			// Send all tools to client via notification
 			h.NotifyToolsChanged(sess)
-		}()
-	}
 
-	// Mark session as initialized
-	sess.SetInitialized(true)
+			// Mark the session as fully initialized
+			sess.SetInitialized(true)
+
+			// Send the initialized notification
+			notification := map[string]interface{}{
+				"_meta": map[string]interface{}{},
+			}
+
+			if err := h.SendNotificationToClient(sess, "notifications/initialized", notification); err != nil {
+				logger.Error("Failed to send initialized notification: %v", err)
+			} else {
+				logger.Debug("Sent initialized notification")
+			}
+		}()
+	} else {
+		// Mark session as initialized immediately if not sending tools
+		sess.SetInitialized(true)
+	}
 
 	// Log the request and response together
 	logRequestResponse("initialize", req, sess, response, nil)
@@ -249,14 +274,16 @@ func (h *Handler) SendNotificationToClient(sess *session.Session, method string,
 	// Marshal to JSON
 	notificationJSON, err := json.Marshal(notification)
 	if err != nil {
-		logger.Error("Failed to marshal notification: %v", err)
-		return err
+		return fmt.Errorf("failed to marshal notification: %w", err)
 	}
 
-	logger.Debug("Sending notification: %s", string(notificationJSON))
+	// Send the notification
+	if err := sess.SendEvent("message", notificationJSON); err != nil {
+		return fmt.Errorf("failed to send notification: %w", err)
+	}
 
-	// Send the event to the client
-	return sess.SendEvent("message", notificationJSON)
+	logger.Debug("Sent notification: %s", method)
+	return nil
 }
 
 // ListTools handles the tools/list request
@@ -600,26 +627,24 @@ func (h *Handler) ExecuteTool(req *jsonrpc.Request, sess *session.Session) (inte
 	return response, nil
 }
 
-// HandleEditorContext handles editor context updates from the client
+// HandleEditorContext handles the editor/context request
 func (h *Handler) HandleEditorContext(req *jsonrpc.Request, sess *session.Session) (interface{}, *jsonrpc.Error) {
 	logger.Debug("Handling editor/context request")
 
-	// Parse editor context from request
 	var editorContext map[string]interface{}
 
+	// Handle different types of Params
 	if req.Params == nil {
 		logger.Warn("Editor context request has no params")
 		return map[string]interface{}{}, nil
-	}
-
-	// Try to convert params to a map
-	if contextMap, ok := req.Params.(map[string]interface{}); ok {
-		editorContext = contextMap
+	} else if paramsMap, ok := req.Params.(map[string]interface{}); ok {
+		// If params is already a map, use it directly
+		editorContext = paramsMap
 	} else {
 		// Try to unmarshal from JSON
 		paramsJSON, err := json.Marshal(req.Params)
 		if err != nil {
-			logger.Error("Failed to marshal editor context params: %v", err)
+			logger.Error("Failed to marshal params: %v", err)
 			return map[string]interface{}{}, nil
 		}
 
@@ -629,8 +654,10 @@ func (h *Handler) HandleEditorContext(req *jsonrpc.Request, sess *session.Sessio
 		}
 	}
 
-	// Store editor context in session
-	sess.SetData("editorContext", editorContext)
+	// Store editor context in session's capabilities
+	caps := sess.GetCapabilities()
+	caps["editorContext"] = editorContext
+	sess.SetCapabilities(caps)
 
 	// Log the context update (sanitized for privacy/size)
 	var keys []string
@@ -747,17 +774,14 @@ func (h *Handler) HandleToolsListChanged(req *jsonrpc.Request, sess *session.Ses
 	return response, nil
 }
 
-// NotifyToolsChanged notifies the client that the tools list has changed
+// NotifyToolsChanged sends a notification to the client that the tools list has changed
 func (h *Handler) NotifyToolsChanged(sess *session.Session) {
-	logger.Info("Sending tools/list_changed notification")
-
-	// Get all tools from the registry
+	// Get all registered tools
 	allTools := h.toolRegistry.GetAllTools()
 
-	// Format tools according to the expected format
+	// Format tools for the notification
 	toolsData := make([]map[string]interface{}, 0, len(allTools))
 	for _, tool := range allTools {
-		// Format the tool data exactly as expected by the client
 		toolData := map[string]interface{}{
 			"name":        tool.Name,
 			"description": tool.Description,
@@ -770,24 +794,16 @@ func (h *Handler) NotifyToolsChanged(sess *session.Session) {
 		toolsData = append(toolsData, toolData)
 	}
 
-	// Create notification params
+	// Create the notification parameters
 	params := map[string]interface{}{
 		"tools": toolsData,
+		"_meta": map[string]interface{}{},
 	}
-
-	// Create notification payload
-	notificationPayload := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"method":  "notifications/tools/list_changed",
-		"params":  params,
-	}
-
-	// Convert to JSON for logging
-	payloadJSON, _ := json.Marshal(notificationPayload)
-	logger.Debug("Notification payload: %s", string(payloadJSON))
 
 	// Send the notification
 	if err := h.SendNotificationToClient(sess, "notifications/tools/list_changed", params); err != nil {
 		logger.Error("Failed to send tools list changed notification: %v", err)
+	} else {
+		logger.Debug("Sent tools list changed notification with %d tools", len(toolsData))
 	}
 }

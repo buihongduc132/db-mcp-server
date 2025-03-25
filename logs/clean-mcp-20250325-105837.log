@@ -1,0 +1,642 @@
+Starting MCP server at Tue Mar 25 10:58:37 +07 2025
+Loaded environment from .env
+Executing MCP server with stdio transport
+2025/03/25 10:58:37 Loaded configuration from .env file
+2025/03/25 10:58:37 Warning: Failed to initialize database connections: failed to load database config: unsupported database type for connection cashflow_sqlite: sqlite
+2025/03/25 10:58:37 Starting server in stdio mode
+2025/03/25 10:58:37.117 INFO: Created new STDIO session 1c35c616-ab9a-4f3d-b6b6-5c77b0c59e57
+2025/03/25 10:58:37.117 INFO: STDIO transport started, waiting for requests on stdin...
+2025/03/25 10:58:37.117 DEBUG: Received request: {"jsonrpc":"2.0","id":0,"method":"initialize","params":{"capabilities":{"logging":false,"prompts":false,"resources":true,"roots":{"listChanged":false},"tools":true},"clientInfo":{"name":"cursor-vscode","version":"1.0.0"},"protocolVersion":"2024-11-05"}}
+2025/03/25 10:58:37.117 INFO: Processing request: method=initialize, id=0
+2025/03/25 10:58:37.117 DEBUG: Handling initialize request
+2025/03/25 10:58:37.117 INFO: Client connected: cursor-vscode v1.0.0
+2025/03/25 10:58:37.117 DEBUG: Client capabilities: {"logging":false,"prompts":false,"resources":true,"roots":{"listChanged":false},"tools":true}
+2025/03/25 10:58:37.117 INFO: Available tools: dbSchema, dbQuery, dbExecute, dbTransaction, dbPerformanceAnalyzer, showConnectedDatabases
+2025/03/25 10:58:37.117 INFO: Client indicates support for tools
+2025/03/25 10:58:37.117 DEBUG: ==== BEGIN initialize [ID:0] [Session: 1c35c616-ab9a-4f3d-b6b6-5c77b0c59e57] ====
+2025/03/25 10:58:37.117 DEBUG: REQUEST:
+{
+  "id": 0,
+  "jsonrpc": "2.0",
+  "method": "initialize",
+  "params": {
+    "capabilities": {
+      "logging": false,
+      "prompts": false,
+      "resources": true,
+      "roots": {
+        "listChanged": false
+      },
+      "tools": true
+    },
+    "clientInfo": {
+      "name": "cursor-vscode",
+      "version": "1.0.0"
+    },
+    "protocolVersion": "2024-11-05"
+  }
+}
+2025/03/25 10:58:37.117 DEBUG: RESPONSE:
+{
+  "capabilities": {
+    "logging": {},
+    "prompts": {
+      "listChanged": true
+    },
+    "resources": {
+      "listChanged": true,
+      "subscribe": true
+    },
+    "tools": {
+      "available": [
+        {
+          "description": "Manage database transactions (begin, commit, rollback, execute within transaction)",
+          "inputSchema": {
+            "properties": {
+              "action": {
+                "description": "Transaction action: begin, commit, rollback, or execute",
+                "enum": [
+                  "begin",
+                  "commit",
+                  "rollback",
+                  "execute"
+                ],
+                "type": "string"
+              },
+              "database": {
+                "description": "Database ID to use (optional if only one database is configured)",
+                "type": "string"
+              },
+              "params": {
+                "description": "Parameters for the statement (for prepared statements, used with execute action)",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "statement": {
+                "description": "SQL statement to execute (required for execute action)",
+                "type": "string"
+              },
+              "transactionId": {
+                "description": "Transaction ID (required for commit, rollback, and execute actions)",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action"
+            ],
+            "type": "object"
+          },
+          "name": "dbTransaction"
+        },
+        {
+          "description": "Identify slow queries and optimization opportunities",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database ID to use (optional if only one database is configured)",
+                "type": "string"
+              },
+              "query": {
+                "description": "SQL query to analyze",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "name": "dbPerformanceAnalyzer"
+        },
+        {
+          "description": "Shows information about all connected databases",
+          "inputSchema": {
+            "properties": {},
+            "required": null,
+            "type": "object"
+          },
+          "name": "showConnectedDatabases"
+        },
+        {
+          "description": "Auto-discover database structure and relationships",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database name to explore (optional, leave empty for all databases)",
+                "type": "string"
+              },
+              "table": {
+                "description": "Table name to explore (optional, leave empty for all tables)",
+                "type": "string"
+              }
+            },
+            "required": null,
+            "type": "object"
+          },
+          "name": "dbSchema"
+        },
+        {
+          "description": "Execute a database query that returns results",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database ID to query (optional if only one database is configured)",
+                "type": "string"
+              },
+              "params": {
+                "description": "Parameters for the query (for prepared statements)",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "query": {
+                "description": "SQL query to execute",
+                "type": "string"
+              },
+              "timeout": {
+                "description": "Query timeout in milliseconds (default: 5000)",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "name": "dbQuery"
+        },
+        {
+          "description": "Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database ID to use (optional if only one database is configured)",
+                "type": "string"
+              },
+              "params": {
+                "description": "Parameters for the statement (for prepared statements)",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "statement": {
+                "description": "SQL statement to execute",
+                "type": "string"
+              }
+            },
+            "required": [
+              "statement"
+            ],
+            "type": "object"
+          },
+          "name": "dbExecute"
+        }
+      ]
+    }
+  },
+  "protocolVersion": "2024-11-05",
+  "serverInfo": {
+    "name": "MCP Server",
+    "version": "1.0.0"
+  }
+}
+2025/03/25 10:58:37.117 DEBUG: ==== END initialize [ID:0] ====
+2025/03/25 10:58:37.117 DEBUG: Sending response: {"id":0,"jsonrpc":"2.0","result":{"capabilities":{"logging":{},"prompts":{"listChanged":true},"resources":{"listChanged":true,"subscribe":true},"tools":{"available":[{"description":"Manage database transactions (begin, commit, rollback, execute within transaction)","inputSchema":{"properties":{"action":{"description":"Transaction action: begin, commit, rollback, or execute","enum":["begin","commit","rollback","execute"],"type":"string"},"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements, used with execute action)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute (required for execute action)","type":"string"},"transactionId":{"description":"Transaction ID (required for commit, rollback, and execute actions)","type":"string"}},"required":["action"],"type":"object"},"name":"dbTransaction"},{"description":"Identify slow queries and optimization opportunities","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"query":{"description":"SQL query to analyze","type":"string"}},"required":["query"],"type":"object"},"name":"dbPerformanceAnalyzer"},{"description":"Shows information about all connected databases","inputSchema":{"properties":{},"required":null,"type":"object"},"name":"showConnectedDatabases"},{"description":"Auto-discover database structure and relationships","inputSchema":{"properties":{"database":{"description":"Database name to explore (optional, leave empty for all databases)","type":"string"},"table":{"description":"Table name to explore (optional, leave empty for all tables)","type":"string"}},"required":null,"type":"object"},"name":"dbSchema"},{"description":"Execute a database query that returns results","inputSchema":{"properties":{"database":{"description":"Database ID to query (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the query (for prepared statements)","items":{"type":"string"},"type":"array"},"query":{"description":"SQL query to execute","type":"string"},"timeout":{"description":"Query timeout in milliseconds (default: 5000)","type":"integer"}},"required":["query"],"type":"object"},"name":"dbQuery"},{"description":"Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute","type":"string"}},"required":["statement"],"type":"object"},"name":"dbExecute"}]}},"protocolVersion":"2024-11-05","serverInfo":{"name":"MCP Server","version":"1.0.0"}}}
+2025/03/25 10:58:37.117 ERROR: Failed to send response: session not connected
+2025/03/25 10:58:37.618 INFO: Sending tools/list_changed notification
+2025/03/25 10:58:37.619 DEBUG: Notification payload: {"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{"tools":[{"description":"Identify slow queries and optimization opportunities","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"query":{"description":"SQL query to analyze","type":"string"}},"required":["query"],"type":"object"},"name":"dbPerformanceAnalyzer"},{"description":"Shows information about all connected databases","inputSchema":{"properties":{},"required":null,"type":"object"},"name":"showConnectedDatabases"},{"description":"Auto-discover database structure and relationships","inputSchema":{"properties":{"database":{"description":"Database name to explore (optional, leave empty for all databases)","type":"string"},"table":{"description":"Table name to explore (optional, leave empty for all tables)","type":"string"}},"required":null,"type":"object"},"name":"dbSchema"},{"description":"Execute a database query that returns results","inputSchema":{"properties":{"database":{"description":"Database ID to query (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the query (for prepared statements)","items":{"type":"string"},"type":"array"},"query":{"description":"SQL query to execute","type":"string"},"timeout":{"description":"Query timeout in milliseconds (default: 5000)","type":"integer"}},"required":["query"],"type":"object"},"name":"dbQuery"},{"description":"Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute","type":"string"}},"required":["statement"],"type":"object"},"name":"dbExecute"},{"description":"Manage database transactions (begin, commit, rollback, execute within transaction)","inputSchema":{"properties":{"action":{"description":"Transaction action: begin, commit, rollback, or execute","enum":["begin","commit","rollback","execute"],"type":"string"},"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements, used with execute action)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute (required for execute action)","type":"string"},"transactionId":{"description":"Transaction ID (required for commit, rollback, and execute actions)","type":"string"}},"required":["action"],"type":"object"},"name":"dbTransaction"}]}}
+2025/03/25 10:58:37.619 DEBUG: Sending notification: {"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{"tools":[{"description":"Identify slow queries and optimization opportunities","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"query":{"description":"SQL query to analyze","type":"string"}},"required":["query"],"type":"object"},"name":"dbPerformanceAnalyzer"},{"description":"Shows information about all connected databases","inputSchema":{"properties":{},"required":null,"type":"object"},"name":"showConnectedDatabases"},{"description":"Auto-discover database structure and relationships","inputSchema":{"properties":{"database":{"description":"Database name to explore (optional, leave empty for all databases)","type":"string"},"table":{"description":"Table name to explore (optional, leave empty for all tables)","type":"string"}},"required":null,"type":"object"},"name":"dbSchema"},{"description":"Execute a database query that returns results","inputSchema":{"properties":{"database":{"description":"Database ID to query (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the query (for prepared statements)","items":{"type":"string"},"type":"array"},"query":{"description":"SQL query to execute","type":"string"},"timeout":{"description":"Query timeout in milliseconds (default: 5000)","type":"integer"}},"required":["query"],"type":"object"},"name":"dbQuery"},{"description":"Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute","type":"string"}},"required":["statement"],"type":"object"},"name":"dbExecute"},{"description":"Manage database transactions (begin, commit, rollback, execute within transaction)","inputSchema":{"properties":{"action":{"description":"Transaction action: begin, commit, rollback, or execute","enum":["begin","commit","rollback","execute"],"type":"string"},"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements, used with execute action)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute (required for execute action)","type":"string"},"transactionId":{"description":"Transaction ID (required for commit, rollback, and execute actions)","type":"string"}},"required":["action"],"type":"object"},"name":"dbTransaction"}]}}
+2025/03/25 10:58:37.619 ERROR: Failed to send tools list changed notification: session not connected
+Starting MCP server at Tue Mar 25 10:58:37 +07 2025
+Loaded environment from .env
+Executing MCP server with stdio transport
+2025/03/25 10:58:37 Loaded configuration from .env file
+2025/03/25 10:58:37 Warning: Failed to initialize database connections: failed to load database config: unsupported database type for connection cashflow_sqlite: sqlite
+2025/03/25 10:58:37 Starting server in stdio mode
+2025/03/25 10:58:37.818 INFO: Created new STDIO session e7a42075-0f5b-4986-a661-9b91abb41c5d
+2025/03/25 10:58:37.818 INFO: STDIO transport started, waiting for requests on stdin...
+2025/03/25 10:58:37.818 DEBUG: Received request: {"jsonrpc":"2.0","id":0,"method":"initialize","params":{"capabilities":{"logging":false,"prompts":false,"resources":true,"roots":{"listChanged":false},"tools":true},"clientInfo":{"name":"cursor-vscode","version":"1.0.0"},"protocolVersion":"2024-11-05"}}
+2025/03/25 10:58:37.818 INFO: Processing request: method=initialize, id=0
+2025/03/25 10:58:37.818 DEBUG: Handling initialize request
+2025/03/25 10:58:37.818 INFO: Client connected: cursor-vscode v1.0.0
+2025/03/25 10:58:37.818 DEBUG: Client capabilities: {"logging":false,"prompts":false,"resources":true,"roots":{"listChanged":false},"tools":true}
+2025/03/25 10:58:37.818 INFO: Available tools: dbSchema, dbQuery, dbExecute, dbTransaction, dbPerformanceAnalyzer, showConnectedDatabases
+2025/03/25 10:58:37.818 INFO: Client indicates support for tools
+2025/03/25 10:58:37.818 DEBUG: ==== BEGIN initialize [ID:0] [Session: e7a42075-0f5b-4986-a661-9b91abb41c5d] ====
+2025/03/25 10:58:37.818 DEBUG: REQUEST:
+{
+  "id": 0,
+  "jsonrpc": "2.0",
+  "method": "initialize",
+  "params": {
+    "capabilities": {
+      "logging": false,
+      "prompts": false,
+      "resources": true,
+      "roots": {
+        "listChanged": false
+      },
+      "tools": true
+    },
+    "clientInfo": {
+      "name": "cursor-vscode",
+      "version": "1.0.0"
+    },
+    "protocolVersion": "2024-11-05"
+  }
+}
+2025/03/25 10:58:37.818 DEBUG: RESPONSE:
+{
+  "capabilities": {
+    "logging": {},
+    "prompts": {
+      "listChanged": true
+    },
+    "resources": {
+      "listChanged": true,
+      "subscribe": true
+    },
+    "tools": {
+      "available": [
+        {
+          "description": "Manage database transactions (begin, commit, rollback, execute within transaction)",
+          "inputSchema": {
+            "properties": {
+              "action": {
+                "description": "Transaction action: begin, commit, rollback, or execute",
+                "enum": [
+                  "begin",
+                  "commit",
+                  "rollback",
+                  "execute"
+                ],
+                "type": "string"
+              },
+              "database": {
+                "description": "Database ID to use (optional if only one database is configured)",
+                "type": "string"
+              },
+              "params": {
+                "description": "Parameters for the statement (for prepared statements, used with execute action)",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "statement": {
+                "description": "SQL statement to execute (required for execute action)",
+                "type": "string"
+              },
+              "transactionId": {
+                "description": "Transaction ID (required for commit, rollback, and execute actions)",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action"
+            ],
+            "type": "object"
+          },
+          "name": "dbTransaction"
+        },
+        {
+          "description": "Identify slow queries and optimization opportunities",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database ID to use (optional if only one database is configured)",
+                "type": "string"
+              },
+              "query": {
+                "description": "SQL query to analyze",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "name": "dbPerformanceAnalyzer"
+        },
+        {
+          "description": "Shows information about all connected databases",
+          "inputSchema": {
+            "properties": {},
+            "required": null,
+            "type": "object"
+          },
+          "name": "showConnectedDatabases"
+        },
+        {
+          "description": "Auto-discover database structure and relationships",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database name to explore (optional, leave empty for all databases)",
+                "type": "string"
+              },
+              "table": {
+                "description": "Table name to explore (optional, leave empty for all tables)",
+                "type": "string"
+              }
+            },
+            "required": null,
+            "type": "object"
+          },
+          "name": "dbSchema"
+        },
+        {
+          "description": "Execute a database query that returns results",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database ID to query (optional if only one database is configured)",
+                "type": "string"
+              },
+              "params": {
+                "description": "Parameters for the query (for prepared statements)",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "query": {
+                "description": "SQL query to execute",
+                "type": "string"
+              },
+              "timeout": {
+                "description": "Query timeout in milliseconds (default: 5000)",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "name": "dbQuery"
+        },
+        {
+          "description": "Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database ID to use (optional if only one database is configured)",
+                "type": "string"
+              },
+              "params": {
+                "description": "Parameters for the statement (for prepared statements)",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "statement": {
+                "description": "SQL statement to execute",
+                "type": "string"
+              }
+            },
+            "required": [
+              "statement"
+            ],
+            "type": "object"
+          },
+          "name": "dbExecute"
+        }
+      ]
+    }
+  },
+  "protocolVersion": "2024-11-05",
+  "serverInfo": {
+    "name": "MCP Server",
+    "version": "1.0.0"
+  }
+}
+2025/03/25 10:58:37.818 DEBUG: ==== END initialize [ID:0] ====
+2025/03/25 10:58:37.819 DEBUG: Sending response: {"id":0,"jsonrpc":"2.0","result":{"capabilities":{"logging":{},"prompts":{"listChanged":true},"resources":{"listChanged":true,"subscribe":true},"tools":{"available":[{"description":"Manage database transactions (begin, commit, rollback, execute within transaction)","inputSchema":{"properties":{"action":{"description":"Transaction action: begin, commit, rollback, or execute","enum":["begin","commit","rollback","execute"],"type":"string"},"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements, used with execute action)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute (required for execute action)","type":"string"},"transactionId":{"description":"Transaction ID (required for commit, rollback, and execute actions)","type":"string"}},"required":["action"],"type":"object"},"name":"dbTransaction"},{"description":"Identify slow queries and optimization opportunities","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"query":{"description":"SQL query to analyze","type":"string"}},"required":["query"],"type":"object"},"name":"dbPerformanceAnalyzer"},{"description":"Shows information about all connected databases","inputSchema":{"properties":{},"required":null,"type":"object"},"name":"showConnectedDatabases"},{"description":"Auto-discover database structure and relationships","inputSchema":{"properties":{"database":{"description":"Database name to explore (optional, leave empty for all databases)","type":"string"},"table":{"description":"Table name to explore (optional, leave empty for all tables)","type":"string"}},"required":null,"type":"object"},"name":"dbSchema"},{"description":"Execute a database query that returns results","inputSchema":{"properties":{"database":{"description":"Database ID to query (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the query (for prepared statements)","items":{"type":"string"},"type":"array"},"query":{"description":"SQL query to execute","type":"string"},"timeout":{"description":"Query timeout in milliseconds (default: 5000)","type":"integer"}},"required":["query"],"type":"object"},"name":"dbQuery"},{"description":"Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute","type":"string"}},"required":["statement"],"type":"object"},"name":"dbExecute"}]}},"protocolVersion":"2024-11-05","serverInfo":{"name":"MCP Server","version":"1.0.0"}}}
+2025/03/25 10:58:37.819 ERROR: Failed to send response: session not connected
+Starting MCP server at Tue Mar 25 10:58:37 +07 2025
+Loaded environment from .env
+Executing MCP server with stdio transport
+2025/03/25 10:58:37 Loaded configuration from .env file
+2025/03/25 10:58:37 Warning: Failed to initialize database connections: failed to load database config: unsupported database type for connection cashflow_sqlite: sqlite
+2025/03/25 10:58:37 Starting server in stdio mode
+2025/03/25 10:58:37.950 INFO: Created new STDIO session d6a20c2b-d6ab-4ee7-bb0b-b699f4870cb4
+2025/03/25 10:58:37.950 INFO: STDIO transport started, waiting for requests on stdin...
+2025/03/25 10:58:37.950 DEBUG: Received request: {"jsonrpc":"2.0","id":0,"method":"initialize","params":{"capabilities":{"logging":false,"prompts":false,"resources":true,"roots":{"listChanged":false},"tools":true},"clientInfo":{"name":"cursor-vscode","version":"1.0.0"},"protocolVersion":"2024-11-05"}}
+2025/03/25 10:58:37.950 INFO: Processing request: method=initialize, id=0
+2025/03/25 10:58:37.950 DEBUG: Handling initialize request
+2025/03/25 10:58:37.950 INFO: Client connected: cursor-vscode v1.0.0
+2025/03/25 10:58:37.950 DEBUG: Client capabilities: {"logging":false,"prompts":false,"resources":true,"roots":{"listChanged":false},"tools":true}
+2025/03/25 10:58:37.950 INFO: Available tools: dbExecute, dbTransaction, dbPerformanceAnalyzer, showConnectedDatabases, dbSchema, dbQuery
+2025/03/25 10:58:37.950 INFO: Client indicates support for tools
+2025/03/25 10:58:37.951 DEBUG: ==== BEGIN initialize [ID:0] [Session: d6a20c2b-d6ab-4ee7-bb0b-b699f4870cb4] ====
+2025/03/25 10:58:37.951 DEBUG: REQUEST:
+{
+  "id": 0,
+  "jsonrpc": "2.0",
+  "method": "initialize",
+  "params": {
+    "capabilities": {
+      "logging": false,
+      "prompts": false,
+      "resources": true,
+      "roots": {
+        "listChanged": false
+      },
+      "tools": true
+    },
+    "clientInfo": {
+      "name": "cursor-vscode",
+      "version": "1.0.0"
+    },
+    "protocolVersion": "2024-11-05"
+  }
+}
+2025/03/25 10:58:37.951 DEBUG: RESPONSE:
+{
+  "capabilities": {
+    "logging": {},
+    "prompts": {
+      "listChanged": true
+    },
+    "resources": {
+      "listChanged": true,
+      "subscribe": true
+    },
+    "tools": {
+      "available": [
+        {
+          "description": "Manage database transactions (begin, commit, rollback, execute within transaction)",
+          "inputSchema": {
+            "properties": {
+              "action": {
+                "description": "Transaction action: begin, commit, rollback, or execute",
+                "enum": [
+                  "begin",
+                  "commit",
+                  "rollback",
+                  "execute"
+                ],
+                "type": "string"
+              },
+              "database": {
+                "description": "Database ID to use (optional if only one database is configured)",
+                "type": "string"
+              },
+              "params": {
+                "description": "Parameters for the statement (for prepared statements, used with execute action)",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "statement": {
+                "description": "SQL statement to execute (required for execute action)",
+                "type": "string"
+              },
+              "transactionId": {
+                "description": "Transaction ID (required for commit, rollback, and execute actions)",
+                "type": "string"
+              }
+            },
+            "required": [
+              "action"
+            ],
+            "type": "object"
+          },
+          "name": "dbTransaction"
+        },
+        {
+          "description": "Identify slow queries and optimization opportunities",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database ID to use (optional if only one database is configured)",
+                "type": "string"
+              },
+              "query": {
+                "description": "SQL query to analyze",
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "name": "dbPerformanceAnalyzer"
+        },
+        {
+          "description": "Shows information about all connected databases",
+          "inputSchema": {
+            "properties": {},
+            "required": null,
+            "type": "object"
+          },
+          "name": "showConnectedDatabases"
+        },
+        {
+          "description": "Auto-discover database structure and relationships",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database name to explore (optional, leave empty for all databases)",
+                "type": "string"
+              },
+              "table": {
+                "description": "Table name to explore (optional, leave empty for all tables)",
+                "type": "string"
+              }
+            },
+            "required": null,
+            "type": "object"
+          },
+          "name": "dbSchema"
+        },
+        {
+          "description": "Execute a database query that returns results",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database ID to query (optional if only one database is configured)",
+                "type": "string"
+              },
+              "params": {
+                "description": "Parameters for the query (for prepared statements)",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "query": {
+                "description": "SQL query to execute",
+                "type": "string"
+              },
+              "timeout": {
+                "description": "Query timeout in milliseconds (default: 5000)",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "query"
+            ],
+            "type": "object"
+          },
+          "name": "dbQuery"
+        },
+        {
+          "description": "Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)",
+          "inputSchema": {
+            "properties": {
+              "database": {
+                "description": "Database ID to use (optional if only one database is configured)",
+                "type": "string"
+              },
+              "params": {
+                "description": "Parameters for the statement (for prepared statements)",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "statement": {
+                "description": "SQL statement to execute",
+                "type": "string"
+              }
+            },
+            "required": [
+              "statement"
+            ],
+            "type": "object"
+          },
+          "name": "dbExecute"
+        }
+      ]
+    }
+  },
+  "protocolVersion": "2024-11-05",
+  "serverInfo": {
+    "name": "MCP Server",
+    "version": "1.0.0"
+  }
+}
+2025/03/25 10:58:37.951 DEBUG: ==== END initialize [ID:0] ====
+2025/03/25 10:58:37.951 DEBUG: Sending response: {"id":0,"jsonrpc":"2.0","result":{"capabilities":{"logging":{},"prompts":{"listChanged":true},"resources":{"listChanged":true,"subscribe":true},"tools":{"available":[{"description":"Manage database transactions (begin, commit, rollback, execute within transaction)","inputSchema":{"properties":{"action":{"description":"Transaction action: begin, commit, rollback, or execute","enum":["begin","commit","rollback","execute"],"type":"string"},"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements, used with execute action)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute (required for execute action)","type":"string"},"transactionId":{"description":"Transaction ID (required for commit, rollback, and execute actions)","type":"string"}},"required":["action"],"type":"object"},"name":"dbTransaction"},{"description":"Identify slow queries and optimization opportunities","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"query":{"description":"SQL query to analyze","type":"string"}},"required":["query"],"type":"object"},"name":"dbPerformanceAnalyzer"},{"description":"Shows information about all connected databases","inputSchema":{"properties":{},"required":null,"type":"object"},"name":"showConnectedDatabases"},{"description":"Auto-discover database structure and relationships","inputSchema":{"properties":{"database":{"description":"Database name to explore (optional, leave empty for all databases)","type":"string"},"table":{"description":"Table name to explore (optional, leave empty for all tables)","type":"string"}},"required":null,"type":"object"},"name":"dbSchema"},{"description":"Execute a database query that returns results","inputSchema":{"properties":{"database":{"description":"Database ID to query (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the query (for prepared statements)","items":{"type":"string"},"type":"array"},"query":{"description":"SQL query to execute","type":"string"},"timeout":{"description":"Query timeout in milliseconds (default: 5000)","type":"integer"}},"required":["query"],"type":"object"},"name":"dbQuery"},{"description":"Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute","type":"string"}},"required":["statement"],"type":"object"},"name":"dbExecute"}]}},"protocolVersion":"2024-11-05","serverInfo":{"name":"MCP Server","version":"1.0.0"}}}
+2025/03/25 10:58:37.951 ERROR: Failed to send response: session not connected
+2025/03/25 10:58:38.319 INFO: Sending tools/list_changed notification
+2025/03/25 10:58:38.320 DEBUG: Notification payload: {"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{"tools":[{"description":"Auto-discover database structure and relationships","inputSchema":{"properties":{"database":{"description":"Database name to explore (optional, leave empty for all databases)","type":"string"},"table":{"description":"Table name to explore (optional, leave empty for all tables)","type":"string"}},"required":null,"type":"object"},"name":"dbSchema"},{"description":"Execute a database query that returns results","inputSchema":{"properties":{"database":{"description":"Database ID to query (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the query (for prepared statements)","items":{"type":"string"},"type":"array"},"query":{"description":"SQL query to execute","type":"string"},"timeout":{"description":"Query timeout in milliseconds (default: 5000)","type":"integer"}},"required":["query"],"type":"object"},"name":"dbQuery"},{"description":"Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute","type":"string"}},"required":["statement"],"type":"object"},"name":"dbExecute"},{"description":"Manage database transactions (begin, commit, rollback, execute within transaction)","inputSchema":{"properties":{"action":{"description":"Transaction action: begin, commit, rollback, or execute","enum":["begin","commit","rollback","execute"],"type":"string"},"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements, used with execute action)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute (required for execute action)","type":"string"},"transactionId":{"description":"Transaction ID (required for commit, rollback, and execute actions)","type":"string"}},"required":["action"],"type":"object"},"name":"dbTransaction"},{"description":"Identify slow queries and optimization opportunities","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"query":{"description":"SQL query to analyze","type":"string"}},"required":["query"],"type":"object"},"name":"dbPerformanceAnalyzer"},{"description":"Shows information about all connected databases","inputSchema":{"properties":{},"required":null,"type":"object"},"name":"showConnectedDatabases"}]}}
+2025/03/25 10:58:38.320 DEBUG: Sending notification: {"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{"tools":[{"description":"Auto-discover database structure and relationships","inputSchema":{"properties":{"database":{"description":"Database name to explore (optional, leave empty for all databases)","type":"string"},"table":{"description":"Table name to explore (optional, leave empty for all tables)","type":"string"}},"required":null,"type":"object"},"name":"dbSchema"},{"description":"Execute a database query that returns results","inputSchema":{"properties":{"database":{"description":"Database ID to query (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the query (for prepared statements)","items":{"type":"string"},"type":"array"},"query":{"description":"SQL query to execute","type":"string"},"timeout":{"description":"Query timeout in milliseconds (default: 5000)","type":"integer"}},"required":["query"],"type":"object"},"name":"dbQuery"},{"description":"Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute","type":"string"}},"required":["statement"],"type":"object"},"name":"dbExecute"},{"description":"Manage database transactions (begin, commit, rollback, execute within transaction)","inputSchema":{"properties":{"action":{"description":"Transaction action: begin, commit, rollback, or execute","enum":["begin","commit","rollback","execute"],"type":"string"},"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements, used with execute action)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute (required for execute action)","type":"string"},"transactionId":{"description":"Transaction ID (required for commit, rollback, and execute actions)","type":"string"}},"required":["action"],"type":"object"},"name":"dbTransaction"},{"description":"Identify slow queries and optimization opportunities","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"query":{"description":"SQL query to analyze","type":"string"}},"required":["query"],"type":"object"},"name":"dbPerformanceAnalyzer"},{"description":"Shows information about all connected databases","inputSchema":{"properties":{},"required":null,"type":"object"},"name":"showConnectedDatabases"}]}}
+2025/03/25 10:58:38.320 ERROR: Failed to send tools list changed notification: session not connected
+2025/03/25 10:58:38.452 INFO: Sending tools/list_changed notification
+2025/03/25 10:58:38.452 DEBUG: Notification payload: {"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{"tools":[{"description":"Manage database transactions (begin, commit, rollback, execute within transaction)","inputSchema":{"properties":{"action":{"description":"Transaction action: begin, commit, rollback, or execute","enum":["begin","commit","rollback","execute"],"type":"string"},"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements, used with execute action)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute (required for execute action)","type":"string"},"transactionId":{"description":"Transaction ID (required for commit, rollback, and execute actions)","type":"string"}},"required":["action"],"type":"object"},"name":"dbTransaction"},{"description":"Identify slow queries and optimization opportunities","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"query":{"description":"SQL query to analyze","type":"string"}},"required":["query"],"type":"object"},"name":"dbPerformanceAnalyzer"},{"description":"Shows information about all connected databases","inputSchema":{"properties":{},"required":null,"type":"object"},"name":"showConnectedDatabases"},{"description":"Auto-discover database structure and relationships","inputSchema":{"properties":{"database":{"description":"Database name to explore (optional, leave empty for all databases)","type":"string"},"table":{"description":"Table name to explore (optional, leave empty for all tables)","type":"string"}},"required":null,"type":"object"},"name":"dbSchema"},{"description":"Execute a database query that returns results","inputSchema":{"properties":{"database":{"description":"Database ID to query (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the query (for prepared statements)","items":{"type":"string"},"type":"array"},"query":{"description":"SQL query to execute","type":"string"},"timeout":{"description":"Query timeout in milliseconds (default: 5000)","type":"integer"}},"required":["query"],"type":"object"},"name":"dbQuery"},{"description":"Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute","type":"string"}},"required":["statement"],"type":"object"},"name":"dbExecute"}]}}
+2025/03/25 10:58:38.452 DEBUG: Sending notification: {"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{"tools":[{"description":"Manage database transactions (begin, commit, rollback, execute within transaction)","inputSchema":{"properties":{"action":{"description":"Transaction action: begin, commit, rollback, or execute","enum":["begin","commit","rollback","execute"],"type":"string"},"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements, used with execute action)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute (required for execute action)","type":"string"},"transactionId":{"description":"Transaction ID (required for commit, rollback, and execute actions)","type":"string"}},"required":["action"],"type":"object"},"name":"dbTransaction"},{"description":"Identify slow queries and optimization opportunities","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"query":{"description":"SQL query to analyze","type":"string"}},"required":["query"],"type":"object"},"name":"dbPerformanceAnalyzer"},{"description":"Shows information about all connected databases","inputSchema":{"properties":{},"required":null,"type":"object"},"name":"showConnectedDatabases"},{"description":"Auto-discover database structure and relationships","inputSchema":{"properties":{"database":{"description":"Database name to explore (optional, leave empty for all databases)","type":"string"},"table":{"description":"Table name to explore (optional, leave empty for all tables)","type":"string"}},"required":null,"type":"object"},"name":"dbSchema"},{"description":"Execute a database query that returns results","inputSchema":{"properties":{"database":{"description":"Database ID to query (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the query (for prepared statements)","items":{"type":"string"},"type":"array"},"query":{"description":"SQL query to execute","type":"string"},"timeout":{"description":"Query timeout in milliseconds (default: 5000)","type":"integer"}},"required":["query"],"type":"object"},"name":"dbQuery"},{"description":"Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)","inputSchema":{"properties":{"database":{"description":"Database ID to use (optional if only one database is configured)","type":"string"},"params":{"description":"Parameters for the statement (for prepared statements)","items":{"type":"string"},"type":"array"},"statement":{"description":"SQL statement to execute","type":"string"}},"required":["statement"],"type":"object"},"name":"dbExecute"}]}}
+2025/03/25 10:58:38.452 ERROR: Failed to send tools list changed notification: session not connected
+2025/03/25 10:59:04.250 INFO: Received EOF on stdin, shutting down
+2025/03/25 10:59:04.250 INFO: Received EOF on stdin, shutting down
+2025/03/25 10:59:04.250 INFO: Received EOF on stdin, shutting down

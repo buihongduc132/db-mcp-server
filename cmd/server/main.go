@@ -25,6 +25,82 @@ type Server struct {
 	registry       *tools.Registry
 	sessionManager *session.Manager
 	config         *config.Config
+	ready          bool
+	isCursor       bool
+}
+
+// NewServer creates a new Server instance
+func NewServer(cfg *config.Config) (*Server, error) {
+	// Initialize session manager
+	sessionManager := session.NewManager()
+
+	// Start session cleanup goroutine
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			sessionManager.CleanupSessions(30 * time.Minute)
+		}
+	}()
+
+	// Initialize tools registry
+	registry := tools.NewRegistry()
+
+	// Check if we're running in Cursor
+	isCursor := false
+	if cursorEnv := os.Getenv("CURSOR_EDITOR"); cursorEnv != "" {
+		isCursor = true
+		logger.Info("Running in Cursor editor environment")
+	}
+
+	// Initialize database connections if not skipped
+	var dbInitError error
+	if cfg.TransportMode == "stdio" && os.Getenv("SKIP_DB") == "true" {
+		log.Printf("Skipping database initialization for STDIO mode with SKIP_DB=true")
+	} else {
+		dbInitError = dbtools.InitDatabase(cfg)
+		if dbInitError != nil {
+			log.Printf("Warning: Failed to initialize database connections: %v", dbInitError)
+		}
+	}
+
+	// Register database tools (even if db init failed, to allow testing)
+	if err := dbtools.RegisterDatabaseTools(registry); err != nil {
+		return nil, fmt.Errorf("failed to register database tools: %v", err)
+	}
+
+	// Verify database connections only if init didn't fail
+	if dbInitError == nil {
+		ctx := context.Background()
+		dbIDs := dbtools.ListDatabases()
+		if len(dbIDs) == 0 {
+			log.Printf("Warning: No database connections configured")
+		} else {
+			for _, dbID := range dbIDs {
+				db, err := dbtools.GetDatabase(dbID)
+				if err != nil {
+					log.Printf("Warning: Failed to get database %s: %v", dbID, err)
+					continue
+				}
+				if err := db.Ping(ctx); err != nil {
+					log.Printf("Warning: Failed to ping database %s: %v", dbID, err)
+				} else {
+					log.Printf("Successfully connected to database %s", dbID)
+				}
+			}
+		}
+	}
+
+	server := &Server{
+		registry:       registry,
+		sessionManager: sessionManager,
+		config:         cfg,
+		ready:          true,
+		isCursor:       isCursor,
+	}
+
+	return server, nil
 }
 
 func (s *Server) startSSEServer() error {
@@ -56,12 +132,13 @@ func (s *Server) startSSEServer() error {
 
 	// Start server
 	go func() {
+		logger.Info("Starting SSE server on port %d", s.config.ServerPort)
 		serverErrors <- srv.ListenAndServe()
 	}()
 
 	// Listen for interrupt signal
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	// Wait for interrupt signal
 	select {
@@ -92,6 +169,24 @@ func (s *Server) startStdioServer() error {
 		stdioTransport.RegisterMethodHandler(method, handler)
 	}
 
+	// Log registered tools
+	tools := s.registry.GetAllTools()
+	if len(tools) > 0 {
+		toolNames := make([]string, 0, len(tools))
+		for _, tool := range tools {
+			toolNames = append(toolNames, tool.Name)
+		}
+		logger.Info("Registered tools: %v", toolNames)
+	} else {
+		logger.Warn("No tools registered")
+	}
+
+	// Special handling for Cursor
+	if s.isCursor {
+		logger.Info("Configured for Cursor editor - using optimized STDIO communication")
+		// Optionally add any Cursor-specific optimizations here
+	}
+
 	// Start the transport
 	if err := stdioTransport.Start(); err != nil {
 		return fmt.Errorf("failed to start STDIO transport: %w", err)
@@ -105,8 +200,8 @@ func (s *Server) startStdioServer() error {
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	// Wait for a signal
-	<-sigs
-	logger.Info("Received shutdown signal, stopping server...")
+	sig := <-sigs
+	logger.Info("Received signal %v, stopping server...", sig)
 
 	// Stop the transport
 	stdioTransport.Stop()
@@ -115,9 +210,6 @@ func (s *Server) startStdioServer() error {
 }
 
 func main() {
-	// Initialize random number generator
-	// As of Go 1.20, rand.Seed is no longer necessary
-
 	// Parse command line flags
 	transportMode := flag.String("t", "", "Transport mode (sse or stdio)")
 	serverPort := flag.Int("port", 0, "Server port")
@@ -128,6 +220,13 @@ func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	// Check for Cursor environment to automatically set stdio mode
+	if cursorEnv := os.Getenv("CURSOR_EDITOR"); cursorEnv != "" {
+		// Force stdio mode for Cursor editor
+		cfg.TransportMode = "stdio"
+		log.Printf("Detected Cursor editor: forcing stdio transport mode")
 	}
 
 	// Initialize logger with debug level
@@ -149,63 +248,10 @@ func main() {
 		cfg.DBConfigFile = *configFile
 	}
 
-	// Initialize session manager
-	sessionManager := session.NewManager()
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			sessionManager.CleanupSessions(30 * time.Minute)
-		}
-	}()
-
-	// Initialize tools registry
-	registry := tools.NewRegistry()
-
-	// Initialize database connections
-	var dbInitError error
-	if cfg.TransportMode == "stdio" && os.Getenv("SKIP_DB") == "true" {
-		log.Printf("Skipping database initialization for STDIO mode with SKIP_DB=true")
-	} else {
-		dbInitError = dbtools.InitDatabase(cfg)
-		if dbInitError != nil {
-			log.Printf("Warning: Failed to initialize database connections: %v", dbInitError)
-		}
-	}
-
-	// Register database tools (even if db init failed, to allow testing)
-	if err := dbtools.RegisterDatabaseTools(registry); err != nil {
-		log.Fatalf("Failed to register database tools: %v", err)
-	}
-
-	// Verify database connections only if init didn't fail
-	if dbInitError == nil {
-		ctx := context.Background()
-		dbIDs := dbtools.ListDatabases()
-		if len(dbIDs) == 0 {
-			log.Printf("Warning: No database connections configured")
-		} else {
-			for _, dbID := range dbIDs {
-				db, err := dbtools.GetDatabase(dbID)
-				if err != nil {
-					log.Printf("Warning: Failed to get database %s: %v", dbID, err)
-					continue
-				}
-				if err := db.Ping(ctx); err != nil {
-					log.Printf("Warning: Failed to ping database %s: %v", dbID, err)
-				} else {
-					log.Printf("Successfully connected to database %s", dbID)
-				}
-			}
-		}
-	}
-
 	// Create server instance
-	server := &Server{
-		registry:       registry,
-		sessionManager: sessionManager,
-		config:         cfg,
+	server, err := NewServer(cfg)
+	if err != nil {
+		log.Fatalf("Failed to create server: %v", err)
 	}
 
 	// Handle transport mode

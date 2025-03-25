@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,12 +30,24 @@ const (
 	heartbeatInterval = 30
 )
 
-// SSETransport implements the SSE transport for the MCP server
+// SSETransport implements the Server-Sent Events transport
 type SSETransport struct {
 	sessionManager *session.Manager
 	methodHandlers map[string]mcp.MethodHandler
-	basePath       string
 	mu             sync.RWMutex
+	basePath       string
+	activeRequests map[string]*sseRequest
+	requestMu      sync.Mutex
+}
+
+// sseRequest holds information about an active SSE request
+type sseRequest struct {
+	session       *session.Session
+	ctx           context.Context
+	cancel        context.CancelFunc
+	writer        http.ResponseWriter
+	flusher       http.Flusher
+	lastHeartbeat time.Time
 }
 
 // NewSSETransport creates a new SSE transport
@@ -43,6 +56,7 @@ func NewSSETransport(sessionManager *session.Manager, basePath string) *SSETrans
 		sessionManager: sessionManager,
 		methodHandlers: make(map[string]mcp.MethodHandler),
 		basePath:       basePath,
+		activeRequests: make(map[string]*sseRequest),
 	}
 }
 
@@ -61,343 +75,270 @@ func (t *SSETransport) GetMethodHandler(method string) (mcp.MethodHandler, bool)
 	return handler, ok
 }
 
-// HandleSSE handles SSE connection requests
+// HandleSSE handles SSE connections
 func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
-	// Set CORS headers
-	w.Header().Set(headerAccessControlAllowOrigin, "*")
-	w.Header().Set(headerAccessControlAllowHeaders, "Content-Type, Authorization")
-	w.Header().Set(headerAccessControlAllowMethods, "GET, OPTIONS")
-
-	// Handle preflight request
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
+	// Check if the request accepts text/event-stream
+	if r.Header.Get("Accept") != "text/event-stream" {
+		http.Error(w, "This endpoint requires Accept: text/event-stream", http.StatusBadRequest)
 		return
 	}
-
-	// Check if the request method is GET
-	if r.Method != http.MethodGet {
-		logger.Error("Method not allowed: %s, expected GET", r.Method)
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Set SSE headers
-	w.Header().Set(headerContentType, contentTypeEventStream)
-	w.Header().Set(headerCacheControl, "no-cache")
-	w.Header().Set(headerConnection, "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no") // Disable buffering for nginx
-
-	// Enable streaming
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	} else {
-		logger.Error("Streaming not supported")
-		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
-	// Log detailed request information
-	logger.Debug("SSE connection request from: %s", r.RemoteAddr)
-	logger.Debug("User-Agent: %s", r.UserAgent())
-	logger.Debug("Query parameters: %v", r.URL.Query())
-
-	// Log all headers for debugging
-	logger.Debug("------ REQUEST HEADERS ------")
-	for name, values := range r.Header {
-		for _, value := range values {
-			logger.Debug("  %s: %s", name, value)
-		}
-	}
-	logger.Debug("----------------------------")
 
 	// Get or create a session
-	sessionID := r.URL.Query().Get("sessionId")
 	var sess *session.Session
-	var err error
+	sessionID := r.URL.Query().Get("sessionId")
 
 	if sessionID != "" {
-		// Try to get an existing session
-		sess, err = t.sessionManager.GetSession(sessionID)
-		if err != nil {
-			logger.Info("Session %s not found, creating new session", sessionID)
+		var ok bool
+		sess, ok = t.sessionManager.GetSession(sessionID)
+		if !ok {
+			// Session not found, create a new one
 			sess = t.sessionManager.CreateSession()
+			sessionID = sess.ID
+			logger.Info("Session not found, created new session: %s", sessionID)
 		} else {
-			logger.Info("Reconnecting to session %s", sessionID)
+			logger.Info("Using existing session: %s", sessionID)
 		}
 	} else {
-		// Create a new session
+		// No session ID provided, create a new session
 		sess = t.sessionManager.CreateSession()
-		logger.Info("Created new session %s", sess.ID)
+		sessionID = sess.ID
+		logger.Info("No session ID provided, created new session: %s", sessionID)
 	}
 
-	// Set event callback
+	// Check if the response writer supports flushing
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported by server", http.StatusInternalServerError)
+		return
+	}
+
+	// Set headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*") // Allow cross-origin requests
+
+	// Set up the SSE connection
+	ctx, cancel := context.WithCancel(r.Context())
+
+	// Store the request information
+	t.requestMu.Lock()
+	t.activeRequests[sessionID] = &sseRequest{
+		session:       sess,
+		ctx:           ctx,
+		cancel:        cancel,
+		writer:        w,
+		flusher:       flusher,
+		lastHeartbeat: time.Now(),
+	}
+	t.requestMu.Unlock()
+
+	// Register event callback for sending events
 	sess.EventCallback = func(event string, data []byte) error {
-		// Log the event
-		logger.SSEEventLog(event, sess.ID, string(data))
+		t.requestMu.Lock()
+		req, ok := t.activeRequests[sessionID]
+		t.requestMu.Unlock()
 
-		// Format the event according to SSE specification with consistent formatting
-		// Ensure exact format: "event: message\ndata: {...}\n\n"
-		eventText := fmt.Sprintf("event: %s\ndata: %s\n\n", event, string(data))
-
-		// Write the event
-		_, writeErr := fmt.Fprint(w, eventText)
-		if writeErr != nil {
-			logger.Error("Error writing event to client: %v", writeErr)
-			return writeErr
+		if !ok {
+			return fmt.Errorf("no active request for session %s", sessionID)
 		}
 
-		// Flush the response writer
-		sess.Flusher.Flush()
-		logger.Debug("Event sent to client: %s", sess.ID)
+		// Check if the context is done
+		select {
+		case <-req.ctx.Done():
+			return fmt.Errorf("request context done")
+		default:
+			// Continue with sending the event
+		}
+
+		// Write the event data
+		fmt.Fprintf(req.writer, "data: %s\n\n", data)
+		req.flusher.Flush()
+
+		// Update last heartbeat time
+		req.lastHeartbeat = time.Now()
+
 		return nil
 	}
 
-	// Connect the session
-	err = sess.Connect(w, r)
-	if err != nil {
-		logger.Error("Failed to connect session: %v", err)
-		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
-		return
+	// Mark the session as connected
+	sess.Connected = true
+
+	// Send the initial connection event
+	initialEvent := map[string]interface{}{
+		"event": "connection",
+		"data": map[string]interface{}{
+			"sessionId": sessionID,
+			"status":    "connected",
+		},
 	}
+	initialEventJSON, _ := json.Marshal(initialEvent)
+	fmt.Fprintf(w, "data: %s\n\n", initialEventJSON)
+	flusher.Flush()
 
-	// Send initial message with the message endpoint
-	messageEndpoint := fmt.Sprintf("%s/message?sessionId=%s", t.basePath, sess.ID)
-	logger.Info("Setting message endpoint to: %s", messageEndpoint)
+	// Start a heartbeat goroutine
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
 
-	// Format and send the endpoint event directly as specified in mcp-go
-	// Use the exact format expected: "event: endpoint\ndata: URL\n\n"
-	initialEvent := fmt.Sprintf("event: endpoint\ndata: %s\n\n", messageEndpoint)
-	logger.Info("Sending initial endpoint event to client")
-	logger.Debug("Endpoint event data: %s", initialEvent)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				t.requestMu.Lock()
+				req, ok := t.activeRequests[sessionID]
+				t.requestMu.Unlock()
 
-	// Write directly to the response writer instead of using SendEvent
-	_, err = fmt.Fprint(w, initialEvent)
-	if err != nil {
-		logger.Error("Failed to send initial endpoint event: %v", err)
-		return
-	}
+				if !ok {
+					return
+				}
 
-	// Flush to ensure the client receives the event immediately
-	sess.Flusher.Flush()
+				// Send a heartbeat event
+				heartbeatEvent := map[string]interface{}{
+					"event": "heartbeat",
+					"data": map[string]interface{}{
+						"time": time.Now().Unix(),
+					},
+				}
+				heartbeatJSON, _ := json.Marshal(heartbeatEvent)
+				fmt.Fprintf(req.writer, "data: %s\n\n", heartbeatJSON)
+				req.flusher.Flush()
 
-	// Start heartbeat in a separate goroutine
-	go t.startHeartbeat(sess)
+				// Update last heartbeat time
+				req.lastHeartbeat = time.Now()
+			}
+		}
+	}()
 
-	// Wait for the client to disconnect
-	<-sess.Context().Done()
-	logger.Info("Client disconnected: %s", sess.ID)
+	// Wait for the connection to close
+	<-ctx.Done()
+
+	// Clean up
+	t.requestMu.Lock()
+	delete(t.activeRequests, sessionID)
+	t.requestMu.Unlock()
+
+	// Mark session as disconnected
+	sess.Connected = false
+	logger.Info("SSE connection closed for session %s", sessionID)
 }
 
-// HandleMessage handles incoming messages from clients
+// HandleMessage handles JSON-RPC message requests
 func (t *SSETransport) HandleMessage(w http.ResponseWriter, r *http.Request) {
 	// Set CORS headers
-	w.Header().Set(headerAccessControlAllowOrigin, "*")
-	w.Header().Set(headerAccessControlAllowHeaders, "Content-Type, Authorization")
-	w.Header().Set(headerAccessControlAllowMethods, "POST, OPTIONS")
-	w.Header().Set(headerContentType, "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept")
 
-	// Handle preflight request
+	// Handle preflight requests
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	// Check request method
+	// Only accept POST requests
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Get session ID from query parameter
+	// Get the session ID from the query parameter
 	sessionID := r.URL.Query().Get("sessionId")
 	if sessionID == "" {
 		http.Error(w, "Missing sessionId parameter", http.StatusBadRequest)
 		return
 	}
 
-	// Get session
-	sess, err := t.sessionManager.GetSession(sessionID)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid session: %v", err), http.StatusBadRequest)
+	// Get the session
+	sess, ok := t.sessionManager.GetSession(sessionID)
+	if !ok {
+		http.Error(w, "Session not found", http.StatusNotFound)
 		return
 	}
 
-	// Parse request body as JSON-RPC request
+	// Update session last active time
+	sess.UpdateLastActive()
+
+	// Parse the JSON-RPC request
 	var req jsonrpc.Request
 	decoder := json.NewDecoder(r.Body)
-	err = decoder.Decode(&req)
-	if err != nil {
-		logger.Error("Failed to decode JSON-RPC request: %v", err)
-		errorResponse := jsonrpc.Error{
+	if err := decoder.Decode(&req); err != nil {
+		jsonErr := &jsonrpc.Error{
 			Code:    jsonrpc.ParseErrorCode,
-			Message: "Invalid JSON: " + err.Error(),
+			Message: fmt.Sprintf("Invalid JSON: %v", err),
 		}
-		t.sendErrorResponse(w, nil, &errorResponse)
+		t.sendJSONRPCResponse(w, nil, jsonErr)
 		return
 	}
 
-	// Log received request
-	reqJSON, _ := json.Marshal(req)
-	logger.Debug("Received request: %s", string(reqJSON))
-	logger.Info("Processing request: method=%s, id=%v", req.Method, req.ID)
-
-	// Find handler for the method
+	// Find the method handler
 	handler, ok := t.GetMethodHandler(req.Method)
 	if !ok {
-		logger.Error("Method not found: %s", req.Method)
-		errorResponse := jsonrpc.Error{
+		jsonErr := &jsonrpc.Error{
 			Code:    jsonrpc.MethodNotFoundCode,
 			Message: fmt.Sprintf("Method not found: %s", req.Method),
 		}
-		t.sendErrorResponse(w, req.ID, &errorResponse)
+		t.sendJSONRPCResponse(w, req.ID, jsonErr)
 		return
 	}
 
-	// Process the request with the handler
-	result, jsonRPCErr := t.processRequest(&req, sess, handler)
+	// Execute the handler
+	result, jsonErr := handler(&req, sess)
 
-	// Check if this is a notification (no ID)
-	isNotification := req.ID == nil
-
-	// Send the response back to the client
-	if jsonRPCErr != nil {
-		logger.Debug("Method handler error: %v", jsonRPCErr)
-		t.sendErrorResponse(w, req.ID, jsonRPCErr)
-	} else if isNotification {
-		// For notifications, return 202 Accepted without a response body
-		logger.Debug("Notification processed successfully")
-		w.WriteHeader(http.StatusAccepted)
-	} else {
-		resultJSON, _ := json.Marshal(result)
-		logger.Debug("Method handler result: %s", string(resultJSON))
-
-		// Ensure consistent response format for all methods
-		response := map[string]interface{}{
-			"jsonrpc": "2.0",
-			"id":      req.ID,
-			"result":  result,
-		}
-
-		responseJSON, err := json.Marshal(response)
-		if err != nil {
-			logger.Error("Failed to marshal response: %v", err)
-			errorResponse := jsonrpc.Error{
-				Code:    jsonrpc.InternalErrorCode,
-				Message: "Failed to marshal response",
-			}
-			t.sendErrorResponse(w, req.ID, &errorResponse)
-			return
-		}
-
-		logger.Debug("Sending response: %s", string(responseJSON))
-
-		// Queue the response to be sent as an event
-		if err := sess.SendEvent("message", responseJSON); err != nil {
-			logger.Error("Failed to queue response event: %v", err)
-		}
-
-		// For the HTTP response, just return 202 Accepted
-		w.WriteHeader(http.StatusAccepted)
+	// Send the response if this is not a notification (has an ID)
+	if req.ID != nil {
+		t.sendJSONRPCResponse(w, req.ID, jsonErr, result)
+	} else if jsonErr != nil {
+		// Log error even for notifications
+		logger.Error("Error handling notification %s: %v", req.Method, jsonErr)
 	}
 }
 
-// processRequest processes a JSON-RPC request and returns the result or error
-func (t *SSETransport) processRequest(req *jsonrpc.Request, sess *session.Session, handler mcp.MethodHandler) (interface{}, *jsonrpc.Error) {
-	// Log the request
-	logger.Info("Processing request: method=%s, id=%v", req.Method, req.ID)
+// sendJSONRPCResponse sends a JSON-RPC response
+func (t *SSETransport) sendJSONRPCResponse(w http.ResponseWriter, id interface{}, jsonErr *jsonrpc.Error, result ...interface{}) {
+	w.Header().Set("Content-Type", "application/json")
 
-	// Handle the params type conversion properly
-	// We'll keep the params as they are, and let each handler deal with the type conversion
-	// This avoids any incorrect type assertions
+	var response map[string]interface{}
 
-	// Call the method handler
-	result, jsonRPCErr := handler(req, sess)
-
-	if jsonRPCErr != nil {
-		logger.Error("Method handler error: %v", jsonRPCErr)
-		return nil, jsonRPCErr
-	}
-
-	// Log the result for debugging
-	resultJSON, _ := json.Marshal(result)
-	logger.Debug("Method handler result: %s", string(resultJSON))
-
-	return result, nil
-}
-
-// startHeartbeat sends periodic heartbeat events to keep the connection alive
-func (t *SSETransport) startHeartbeat(sess *session.Session) {
-	ticker := time.NewTicker(heartbeatInterval * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			// Check if the session is still connected
-			if !sess.Connected {
-				return
-			}
-
-			// Format the heartbeat timestamp
-			timestamp := time.Now().Format(time.RFC3339)
-
-			// Use the existing SendEvent method which handles thread safety internally
-			err := sess.SendEvent("heartbeat", []byte(timestamp))
-			if err != nil {
-				logger.Error("Failed to send heartbeat: %v", err)
-				sess.Disconnect()
-				return
-			}
-
-			logger.Debug("Heartbeat sent to client: %s", sess.ID)
-
-		case <-sess.Context().Done():
-			// Session is closed
-			return
-		}
-	}
-}
-
-// sendErrorResponse sends a JSON-RPC error response to the client
-func (t *SSETransport) sendErrorResponse(w http.ResponseWriter, id interface{}, err *jsonrpc.Error) {
-	response := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"error": map[string]interface{}{
-			"code":    err.Code,
-			"message": err.Message,
-		},
-	}
-
-	// If the error has data, include it
-	if err.Data != nil {
-		response["error"].(map[string]interface{})["data"] = err.Data
-	}
-
-	responseJSON, jsonErr := json.Marshal(response)
 	if jsonErr != nil {
-		logger.Error("Failed to marshal error response: %v", jsonErr)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		// Error response
+		response = map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"error": map[string]interface{}{
+				"code":    jsonErr.Code,
+				"message": jsonErr.Message,
+			},
+		}
+
+		// Include error data if present
+		if jsonErr.Data != nil {
+			response["error"].(map[string]interface{})["data"] = jsonErr.Data
+		}
+	} else if len(result) > 0 {
+		// Success response with result
+		response = map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"result":  result[0],
+		}
+	} else {
+		// Success response without result
+		response = map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      id,
+			"result":  nil,
+		}
+	}
+
+	// Marshal and send
+	respJSON, err := json.Marshal(response)
+	if err != nil {
+		logger.Error("Failed to marshal JSON-RPC response: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	logger.Debug("Sending error response: %s", string(responseJSON))
-
-	// If this is a parse error or other error that occurs before we have a valid session,
-	// send it directly in the HTTP response
-	if id == nil || w.Header().Get(headerContentType) == "" {
-		w.Header().Set(headerContentType, "application/json")
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write(responseJSON); err != nil {
-			logger.Error("Failed to write error response: %v", err)
-		}
-	} else {
-		// For session-related errors, we'll rely on the direct HTTP response
-		// since we don't have access to the session here
-		w.Header().Set(headerContentType, "application/json")
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write(responseJSON); err != nil {
-			logger.Error("Failed to write error response: %v", err)
-		}
-	}
+	w.Write(respJSON)
 }

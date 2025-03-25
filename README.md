@@ -654,6 +654,78 @@ The server includes support for editor-specific features through the `editor/con
 - Open database connections
 - Database structure
 
+## Cursor Editor Integration
+
+This database MCP server now includes special optimizations for the Cursor editor. The integration allows you to use database tools directly within the Cursor AI interface.
+
+### Setting Up for Cursor
+
+#### Option 1: Using the cursor-mcp-clean.sh script (RECOMMENDED)
+
+1. Run the clean script for Cursor integration:
+   ```bash
+   ./cursor-mcp-clean.sh
+   ```
+
+2. This script:
+   - Ensures completely clean stdout for protocol communication
+   - Redirects all non-protocol output to stderr and log files
+   - Provides the most reliable connection to Cursor
+
+#### Option 2: Using the cursor-mcp.sh script
+
+1. Run the Cursor-specific start script:
+   ```bash
+   ./cursor-mcp.sh
+   ```
+
+2. This script will:
+   - Automatically use stdio transport
+   - Optimize performance for Cursor's communication patterns
+   - Configure logging to keep the stdio channel clean
+
+3. In Cursor, connect to the local MCP server when prompted
+
+#### Option 3: Manual Configuration
+
+1. Run with the `-cursor` flag:
+   ```bash
+   ./start-mcp.sh -cursor
+   ```
+
+2. Or run directly with the `CURSOR_EDITOR` environment variable:
+   ```bash
+   CURSOR_EDITOR=1 ./server -t stdio
+   ```
+
+### Features for Cursor
+
+The Cursor integration provides several benefits:
+
+- **Performance Optimization**: Larger buffer sizes and optimized I/O for Cursor's request patterns
+- **Extended Timeouts**: Longer operation timeouts for complex database operations
+- **Better Error Handling**: Enhanced error reporting specifically for Cursor's needs
+- **Automatic Mode Detection**: Server automatically detects when it's running in Cursor
+
+### Available Database Tools
+
+When connected to Cursor, you can use the following database tools:
+
+- `dbQuery`: Execute read-only SQL queries across your configured databases
+- `dbExecute`: Run SQL statements that modify data (INSERT, UPDATE, DELETE)
+- `dbTransaction`: Manage database transactions with commit/rollback support
+- `dbSchema`: Automatically discover and explore your database structure
+- `dbPerformanceAnalyzer`: Identify slow queries and optimization opportunities
+
+### Troubleshooting
+
+If you encounter issues with the Cursor integration:
+
+1. Check the log file in `./logs/` for detailed error messages
+2. Ensure you're using the latest version of both the server and Cursor
+3. Try running with explicit debug logging: `./cursor-mcp.sh -debug`
+4. Verify your database connection settings in the configuration file
+
 ## 🗺️ Roadmap
 
 We're committed to expanding DB MCP Server's AI integration capabilities. Here's our planned development roadmap:
