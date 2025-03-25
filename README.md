@@ -246,3 +246,25 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 alt="Buy Me A Coffee"/>
 </a>
 </p>
+
+## Development Notes
+
+### Dependencies
+
+This project has a dependency on `github.com/mark3labs/mcp-go` which requires Go 1.23 in its go.mod file. Since Go 1.23 is not yet released, we use a local patched version in the `hack/mcp-go` directory for development and CI. The GitHub Actions workflow automatically sets this up.
+
+For local development, you can:
+
+```bash
+# Clone the dependency and fix the Go version
+mkdir -p hack/mcp-go
+git clone https://github.com/mark3labs/mcp-go.git hack/mcp-go
+cd hack/mcp-go
+sed -i 's/go 1.23/go 1.22/' go.mod  # Use 's/go 1.23/go 1.22/' for macOS
+cd ../..
+
+# Update your go.mod to use the local copy
+go mod edit -go=1.22
+go mod edit -replace=github.com/mark3labs/mcp-go=./hack/mcp-go
+go mod tidy
+```
