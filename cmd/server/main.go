@@ -11,18 +11,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mark3labs/mcp-go/server"
+
 	"github.com/FreePeak/db-mcp-server/internal/delivery/mcp"
 	"github.com/FreePeak/db-mcp-server/internal/repository"
 	"github.com/FreePeak/db-mcp-server/internal/usecase"
 	"github.com/FreePeak/db-mcp-server/pkg/dbtools"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 func main() {
 	// Parse command-line arguments
-	configFile := flag.String("config", "", "Database configuration file")
+	configFile := flag.String("c", "config.json", "Database configuration file")
 	transportMode := flag.String("t", "sse", "Transport mode (stdio or sse)")
-	serverPort := flag.Int("port", 9092, "Server port for SSE transport")
+	serverPort := flag.Int("p", 9092, "Server port for SSE transport")
+	serverHost := flag.String("h", "localhost", "Server host for SSE transport")
 	flag.Parse()
 
 	// Initialize database connection from config
@@ -61,7 +63,7 @@ func main() {
 		// Create SSE server
 		sseServer := server.NewSSEServer(
 			mcpServer,
-			server.WithBaseURL(fmt.Sprintf("http://localhost:%d", *serverPort)),
+			server.WithBaseURL(fmt.Sprintf("http://%s:%d", *serverHost, *serverPort)),
 		)
 
 		// Start the server

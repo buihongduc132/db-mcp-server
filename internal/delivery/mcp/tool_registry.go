@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/FreePeak/db-mcp-server/internal/usecase"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/FreePeak/db-mcp-server/internal/usecase"
 )
 
 // ToolRegistry manages the creation and registration of database tools

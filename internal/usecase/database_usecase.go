@@ -38,7 +38,11 @@ func (uc *DatabaseUseCase) ExecuteQuery(ctx context.Context, dbID, query string,
 	if err != nil {
 		return "", fmt.Errorf("query execution failed: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			err = fmt.Errorf("error closing rows: %w", closeErr)
+		}
+	}()
 
 	// Process results into a readable format
 	columns, err := rows.Columns()
@@ -63,8 +67,9 @@ func (uc *DatabaseUseCase) ExecuteQuery(ctx context.Context, dbID, query string,
 	rowCount := 0
 	for rows.Next() {
 		rowCount++
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return "", fmt.Errorf("failed to scan row: %w", err)
+		scanErr := rows.Scan(valuePtrs...)
+		if scanErr != nil {
+			return "", fmt.Errorf("failed to scan row: %w", scanErr)
 		}
 
 		// Convert to strings and print

@@ -46,6 +46,6 @@ fi
 # Run the server in cursor mode with stdio transport
 echo "Starting server..." >&2
 exec ./server \
-  --t stdio \
-  --config "$CONFIG_FILE" \
+  -t stdio \
+  -config "$CONFIG_FILE" \
   2> >(tee -a "$LOG_FILE" >&2) 

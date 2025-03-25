@@ -572,6 +572,8 @@ func getSuggestionForError(errorMsg string) string {
 }
 
 // extractLineNumberFromError extracts line number from a database error message
+//
+//nolint:unused // Used in future implementation
 func extractLineNumberFromError(errMsg string) int {
 	// Check for line number patterns like "at line 42" or "line 42"
 	linePatterns := []string{
@@ -596,6 +598,8 @@ func extractLineNumberFromError(errMsg string) int {
 }
 
 // extractPositionFromError extracts position from a database error message
+//
+//nolint:unused // Used in future implementation
 func extractPositionFromError(errMsg string) int {
 	// Check for position patterns
 	posPatterns := []string{

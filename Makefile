@@ -15,7 +15,7 @@ run-stdio: build
 
 # Run the server in SSE mode
 run-sse: clean build
-	./server -t sse -p 9090
+	./server -t sse -p 9090 -h 127.0.0.1
 
 # Build and run the example client
 client:
