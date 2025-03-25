@@ -570,6 +570,8 @@ func getSuggestionForError(errorMsg string) string {
 	return "Review the query syntax and structure"
 }
 
+// getErrorLineFromMessage extracts the line number from an error message
+// nolint:unused
 func getErrorLineFromMessage(errorMsg string) int {
 	// MySQL format: "ERROR at line 1"
 	// PostgreSQL format: "LINE 2:"
@@ -587,6 +589,8 @@ func getErrorLineFromMessage(errorMsg string) int {
 	return 0
 }
 
+// getErrorColumnFromMessage extracts the column/position number from an error message
+// nolint:unused
 func getErrorColumnFromMessage(errorMsg string) int {
 	// PostgreSQL format: "LINE 1: SELECT * FROM ^ [position: 14]"
 	if strings.Contains(errorMsg, "position:") {
