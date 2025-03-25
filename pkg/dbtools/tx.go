@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/pkg/db"
@@ -13,6 +14,7 @@ import (
 
 // Map to store active transactions
 var transactions = make(map[string]*sql.Tx)
+var transactionMutex sync.RWMutex
 
 // getBoolParam extracts a boolean parameter from the params map
 func getBoolParam(params map[string]interface{}, key string) (bool, bool) {
@@ -436,4 +438,26 @@ func handleMockExecuteTransaction(params map[string]interface{}) (interface{}, e
 		"params":        statementParams,
 		"result":        result,
 	}, nil
+}
+
+// StoreTransaction stores a transaction in the global map
+func StoreTransaction(id string, tx *sql.Tx) {
+	transactionMutex.Lock()
+	defer transactionMutex.Unlock()
+	transactions[id] = tx
+}
+
+// GetTransaction retrieves a transaction from the global map
+func GetTransaction(id string) (*sql.Tx, bool) {
+	transactionMutex.RLock()
+	defer transactionMutex.RUnlock()
+	tx, ok := transactions[id]
+	return tx, ok
+}
+
+// RemoveTransaction removes a transaction from the global map
+func RemoveTransaction(id string) {
+	transactionMutex.Lock()
+	defer transactionMutex.Unlock()
+	delete(transactions, id)
 }

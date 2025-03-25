@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
 // QueryMetrics stores performance metrics for a database query
@@ -272,9 +274,174 @@ func (pa *PerformanceAnalyzer) GetAllMetrics() []*QueryMetrics {
 	return metrics
 }
 
-// Reset clears all collected metrics and history
+// Reset clears all collected metrics
 func (pa *PerformanceAnalyzer) Reset() {
 	pa.queryHistory = make([]QueryRecord, 0)
+}
+
+// GetSlowThreshold returns the current slow query threshold
+func (pa *PerformanceAnalyzer) GetSlowThreshold() time.Duration {
+	return pa.slowThreshold
+}
+
+// SetSlowThreshold sets the slow query threshold
+func (pa *PerformanceAnalyzer) SetSlowThreshold(threshold time.Duration) {
+	pa.slowThreshold = threshold
+}
+
+// createPerformanceAnalyzerTool creates a tool for analyzing database performance
+func createPerformanceAnalyzerTool() *tools.Tool {
+	return &tools.Tool{
+		Name:        "dbPerformanceAnalyzer",
+		Description: "Identify slow queries and optimization opportunities",
+		Category:    "database",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
+				"action": map[string]interface{}{
+					"type":        "string",
+					"description": "Action to perform (getSlowQueries, getMetrics, analyzeQuery, reset, setThreshold)",
+					"enum":        []string{"getSlowQueries", "getMetrics", "analyzeQuery", "reset", "setThreshold"},
+				},
+				"query": map[string]interface{}{
+					"type":        "string",
+					"description": "SQL query to analyze (required for analyzeQuery action)",
+				},
+				"threshold": map[string]interface{}{
+					"type":        "integer",
+					"description": "Threshold in milliseconds for identifying slow queries (required for setThreshold action)",
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum number of results to return (default: 10)",
+				},
+				"database": map[string]interface{}{
+					"type":        "string",
+					"description": "Database ID to use (optional, only needed for certain operations)",
+				},
+			},
+			Required: []string{"action"},
+		},
+		Handler: handlePerformanceAnalyzer,
+	}
+}
+
+// handlePerformanceAnalyzer handles the performance analyzer tool execution
+func handlePerformanceAnalyzer(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	// Get the performance analyzer
+	analyzer := GetPerformanceAnalyzer()
+
+	// Extract action parameter
+	action, ok := getStringParam(params, "action")
+	if !ok {
+		return nil, fmt.Errorf("action parameter is required")
+	}
+
+	// Extract limit parameter (default: 10)
+	limit := 10
+	if limitParam, ok := getIntParam(params, "limit"); ok {
+		limit = limitParam
+	}
+
+	// Handle different actions
+	switch action {
+	case "getSlowQueries":
+		// Get slow queries
+		slowQueries := analyzer.GetAllMetrics()
+
+		// Filter to only include slow queries
+		var filteredQueries []*QueryMetrics
+		for _, metric := range slowQueries {
+			if metric.AvgDuration >= analyzer.slowThreshold {
+				filteredQueries = append(filteredQueries, metric)
+			}
+		}
+
+		// Apply limit
+		if len(filteredQueries) > limit {
+			filteredQueries = filteredQueries[:limit]
+		}
+
+		// Convert to response format
+		result := makeMetricsResponse(filteredQueries)
+		return result, nil
+
+	case "getMetrics":
+		// Get all metrics
+		metrics := analyzer.GetAllMetrics()
+
+		// Apply limit
+		if len(metrics) > limit {
+			metrics = metrics[:limit]
+		}
+
+		// Convert to response format
+		result := makeMetricsResponse(metrics)
+		return result, nil
+
+	case "analyzeQuery":
+		// Extract query parameter
+		query, ok := getStringParam(params, "query")
+		if !ok {
+			return nil, fmt.Errorf("query parameter is required for analyzeQuery action")
+		}
+
+		// Analyze the query
+		suggestions := AnalyzeQuery(query)
+
+		return map[string]interface{}{
+			"query":       query,
+			"suggestions": suggestions,
+		}, nil
+
+	case "reset":
+		// Reset metrics
+		analyzer.Reset()
+		return map[string]interface{}{
+			"success": true,
+			"message": "Performance metrics have been reset",
+		}, nil
+
+	case "setThreshold":
+		// Extract threshold parameter
+		threshold, ok := getIntParam(params, "threshold")
+		if !ok {
+			return nil, fmt.Errorf("threshold parameter is required for setThreshold action")
+		}
+
+		// Set threshold
+		analyzer.slowThreshold = time.Duration(threshold) * time.Millisecond
+		return map[string]interface{}{
+			"success":   true,
+			"message":   fmt.Sprintf("Slow query threshold set to %d ms", threshold),
+			"threshold": threshold,
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("invalid action: %s", action)
+	}
+}
+
+// makeMetricsResponse converts QueryMetrics to a response format
+func makeMetricsResponse(metrics []*QueryMetrics) map[string]interface{} {
+	result := make([]map[string]interface{}, len(metrics))
+
+	for i, metric := range metrics {
+		result[i] = map[string]interface{}{
+			"query":         metric.Query,
+			"count":         metric.Count,
+			"avgDuration":   metric.AvgDuration.String(),
+			"avgDurationMs": float64(metric.AvgDuration.Microseconds()) / 1000.0,
+			"minDuration":   metric.MinDuration.String(),
+			"maxDuration":   metric.MaxDuration.String(),
+			"lastExecuted":  metric.LastExecuted.Format(time.RFC3339),
+		}
+	}
+
+	return map[string]interface{}{
+		"metrics": result,
+		"count":   len(result),
+	}
 }
 
 // AnalyzeQuery analyzes a SQL query and returns optimization suggestions
