@@ -1,8 +1,6 @@
 module github.com/FreePeak/db-mcp-server
 
-go 1.22
-
-toolchain go1.24.1
+go 1.24.1
 
 require (
 	github.com/go-sql-driver/mysql v1.7.1
@@ -11,11 +9,7 @@ require (
 	github.com/mark3labs/mcp-go v0.17.0
 )
 
-require (
-	github.com/google/uuid v1.6.0 // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-)
+require github.com/stretchr/objx v0.5.2 // indirect
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
