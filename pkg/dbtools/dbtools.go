@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
-	"github.com/FreePeak/db-mcp-server/internal/config"
 	"github.com/FreePeak/db-mcp-server/pkg/db"
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
@@ -23,6 +23,28 @@ const (
 	Postgres DatabaseType = "postgres"
 )
 
+// Config represents database configuration
+type Config struct {
+	ConfigFile  string
+	Connections []ConnectionConfig
+}
+
+// ConnectionConfig represents a single database connection configuration
+type ConnectionConfig struct {
+	ID       string       `json:"id"`
+	Type     DatabaseType `json:"type"`
+	Host     string       `json:"host"`
+	Port     int          `json:"port"`
+	Name     string       `json:"name"`
+	User     string       `json:"user"`
+	Password string       `json:"password"`
+}
+
+// MultiDBConfig represents configuration for multiple database connections
+type MultiDBConfig struct {
+	Connections []ConnectionConfig `json:"connections"`
+}
+
 // Database connection manager (singleton)
 var (
 	dbManager *db.Manager
@@ -30,43 +52,72 @@ var (
 
 // DatabaseConnectionInfo represents detailed information about a database connection
 type DatabaseConnectionInfo struct {
-	ID       string       `json:"id"`
-	Type     DatabaseType `json:"type"`
-	Host     string       `json:"host"`
-	Port     int          `json:"port"`
-	Database string       `json:"database"`
-	Status   string       `json:"status"`
-	Latency  string       `json:"latency,omitempty"`
+	ID      string       `json:"id"`
+	Type    DatabaseType `json:"type"`
+	Host    string       `json:"host"`
+	Port    int          `json:"port"`
+	Name    string       `json:"name"`
+	Status  string       `json:"status"`
+	Latency string       `json:"latency,omitempty"`
 }
 
 // InitDatabase initializes the database connections
-func InitDatabase(cfg *config.Config) error {
+func InitDatabase(cfg *Config) error {
 	// Create database manager
 	dbManager = db.NewDBManager()
 
-	// Load configurations
-	if cfg.MultiDBConfig != nil {
-		// Convert config to JSON for loading
-		configJSON, err := json.Marshal(cfg.MultiDBConfig)
+	var multiDBConfig *MultiDBConfig
+
+	// If config file is provided, load it
+	if cfg != nil && cfg.ConfigFile != "" {
+		// Read config file
+		configData, err := os.ReadFile(cfg.ConfigFile)
 		if err != nil {
-			return fmt.Errorf("failed to marshal database config: %w", err)
+			return fmt.Errorf("failed to read config file: %w", err)
 		}
 
-		if err := dbManager.LoadConfig(configJSON); err != nil {
-			return fmt.Errorf("failed to load database config: %w", err)
+		// Parse config
+		multiDBConfig = &MultiDBConfig{}
+		if err := json.Unmarshal(configData, multiDBConfig); err != nil {
+			return fmt.Errorf("failed to parse config file: %w", err)
 		}
-
-		// Connect to all databases
-		if err := dbManager.Connect(); err != nil {
-			return fmt.Errorf("failed to connect to databases: %w", err)
+	} else if cfg != nil && len(cfg.Connections) > 0 {
+		// Use connections from config
+		multiDBConfig = &MultiDBConfig{
+			Connections: cfg.Connections,
 		}
-
-		// Log connected databases
-		dbs := dbManager.ListDatabases()
-		log.Printf("Connected to %d databases: %v", len(dbs), dbs)
 	} else {
-		return fmt.Errorf("no database configuration provided")
+		// Try to load from environment variable
+		dbConfigJSON := os.Getenv("DB_CONFIG")
+		if dbConfigJSON != "" {
+			multiDBConfig = &MultiDBConfig{}
+			if err := json.Unmarshal([]byte(dbConfigJSON), multiDBConfig); err != nil {
+				return fmt.Errorf("failed to parse DB_CONFIG environment variable: %w", err)
+			}
+		} else {
+			return fmt.Errorf("no database configuration provided")
+		}
 	}
+
+	// Load configurations (multiDBConfig will always be non-nil at this point)
+	// Convert config to JSON for loading
+	configJSON, err := json.Marshal(multiDBConfig)
+	if err != nil {
+		return fmt.Errorf("failed to marshal database config: %w", err)
+	}
+
+	if err := dbManager.LoadConfig(configJSON); err != nil {
+		return fmt.Errorf("failed to load database config: %w", err)
+	}
+
+	// Connect to all databases
+	if err := dbManager.Connect(); err != nil {
+		return fmt.Errorf("failed to connect to databases: %w", err)
+	}
+
+	// Log connected databases
+	dbs := dbManager.ListDatabases()
+	log.Printf("Connected to %d databases: %v", len(dbs), dbs)
 
 	return nil
 }
@@ -201,7 +252,7 @@ func RegisterDatabaseTools(registry *tools.Registry) error {
 				},
 				"database": map[string]interface{}{
 					"type":        "string",
-					"description": "Database ID to use (optional if only one database is configured)",
+					"description": "Database ID to query (optional if only one database is configured)",
 				},
 				"params": map[string]interface{}{
 					"type":        "array",
@@ -210,94 +261,97 @@ func RegisterDatabaseTools(registry *tools.Registry) error {
 						"type": "string",
 					},
 				},
+				"timeout": map[string]interface{}{
+					"type":        "integer",
+					"description": "Statement timeout in milliseconds (default: 5000)",
+				},
 			},
 			Required: []string{"statement"},
 		},
 		Handler: handleExecute,
 	})
 
-	// Register transaction tool
+	// Register list databases tool
 	registry.RegisterTool(&tools.Tool{
-		Name:        "dbTransaction",
-		Description: "Manage database transactions (begin, commit, rollback, execute within transaction)",
+		Name:        "dbList",
+		Description: "List all available database connections",
 		InputSchema: tools.ToolInputSchema{
 			Type: "object",
 			Properties: map[string]interface{}{
-				"action": map[string]interface{}{
-					"type":        "string",
-					"description": "Transaction action: begin, commit, rollback, or execute",
-					"enum":        []string{"begin", "commit", "rollback", "execute"},
+				"showStatus": map[string]interface{}{
+					"type":        "boolean",
+					"description": "Show connection status and latency",
 				},
+			},
+		},
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			// Show connection status?
+			showStatus, ok := params["showStatus"].(bool)
+			if ok && showStatus {
+				return showConnectedDatabases(ctx, params)
+			}
+
+			// Just list database IDs
+			return ListDatabases(), nil
+		},
+	})
+
+	// Register query builder tool
+	registry.RegisterTool(&tools.Tool{
+		Name:        "dbQueryBuilder",
+		Description: "Build and execute a query using an object-oriented approach",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
 				"database": map[string]interface{}{
 					"type":        "string",
-					"description": "Database ID to use (optional if only one database is configured)",
+					"description": "Database ID to query",
 				},
-				"transactionId": map[string]interface{}{
+				"table": map[string]interface{}{
 					"type":        "string",
-					"description": "Transaction ID (required for commit, rollback, and execute actions)",
+					"description": "Table name to query",
 				},
-				"statement": map[string]interface{}{
-					"type":        "string",
-					"description": "SQL statement to execute (required for execute action)",
-				},
-				"params": map[string]interface{}{
+				"select": map[string]interface{}{
 					"type":        "array",
-					"description": "Parameters for the statement (for prepared statements, used with execute action)",
+					"description": "Columns to select",
 					"items": map[string]interface{}{
 						"type": "string",
 					},
 				},
-			},
-			Required: []string{"action"},
-		},
-		Handler: handleTransaction,
-	})
-
-	// Register performance analyzer tool
-	registry.RegisterTool(&tools.Tool{
-		Name:        "dbPerformanceAnalyzer",
-		Description: "Identify slow queries and optimization opportunities",
-		InputSchema: tools.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"query": map[string]interface{}{
-					"type":        "string",
-					"description": "SQL query to analyze",
+				"where": map[string]interface{}{
+					"type":        "object",
+					"description": "Where conditions",
 				},
-				"database": map[string]interface{}{
-					"type":        "string",
-					"description": "Database ID to use (optional if only one database is configured)",
+				"orderBy": map[string]interface{}{
+					"type":        "array",
+					"description": "Order by columns",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "Limit results",
+				},
+				"offset": map[string]interface{}{
+					"type":        "integer",
+					"description": "Offset results",
 				},
 			},
-			Required: []string{"query"},
+			Required: []string{"database", "table"},
 		},
-		Handler: handlePerformanceAnalyzer,
-	})
-
-	// Register showConnectedDatabases tool
-	registry.RegisterTool(&tools.Tool{
-		Name:        "showConnectedDatabases",
-		Description: "Shows information about all connected databases",
-		InputSchema: tools.ToolInputSchema{
-			Type:       "object",
-			Properties: map[string]interface{}{},
-		},
-		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-			return showConnectedDatabases(ctx, params)
-		},
+		Handler: handleQueryBuilder,
 	})
 
 	return nil
 }
 
-// PingDatabase tests the connection to a database
+// PingDatabase pings a database to check the connection
 func PingDatabase(db *sql.DB) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return db.PingContext(ctx)
+	return db.Ping()
 }
 
-// Helper function to convert rows to a slice of maps
+// rowsToMaps converts sql.Rows to a slice of maps
 func rowsToMaps(rows *sql.Rows) ([]map[string]interface{}, error) {
 	// Get column names
 	columns, err := rows.Columns()
@@ -305,76 +359,84 @@ func rowsToMaps(rows *sql.Rows) ([]map[string]interface{}, error) {
 		return nil, err
 	}
 
-	// Create a slice of interface{} to hold the values
+	// Make a slice for the values
 	values := make([]interface{}, len(columns))
-	scanArgs := make([]interface{}, len(columns))
-	for i := range values {
-		scanArgs[i] = &values[i]
+
+	// Create references for the values
+	valueRefs := make([]interface{}, len(columns))
+	for i := range columns {
+		valueRefs[i] = &values[i]
 	}
 
-	// Fetch rows
+	// Create the slice to store results
 	var results []map[string]interface{}
+
+	// Fetch rows
 	for rows.Next() {
-		err = rows.Scan(scanArgs...)
+		// Scan the result into the pointers
+		err := rows.Scan(valueRefs...)
 		if err != nil {
 			return nil, err
 		}
 
 		// Create a map for this row
-		row := make(map[string]interface{})
-		for i, col := range columns {
+		result := make(map[string]interface{})
+		for i, column := range columns {
 			val := values[i]
 
-			// Handle NULL values
+			// Handle null values
 			if val == nil {
-				row[col] = nil
+				result[column] = nil
 				continue
 			}
 
-			// Convert byte slices to strings for JSON compatibility
-			switch v := val.(type) {
-			case []byte:
-				row[col] = string(v)
-			case time.Time:
-				row[col] = v.Format(time.RFC3339)
-			default:
-				row[col] = v
+			// Convert bytes to string for easier JSON serialization
+			if b, ok := val.([]byte); ok {
+				result[column] = string(b)
+			} else {
+				result[column] = val
 			}
 		}
 
-		results = append(results, row)
+		results = append(results, result)
 	}
 
-	if err = rows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
 	return results, nil
 }
 
-// Helper function to extract string parameter
+// getStringParam safely extracts a string parameter from the params map
 func getStringParam(params map[string]interface{}, key string) (string, bool) {
-	value, ok := params[key].(string)
-	return value, ok
-}
-
-// Helper function to extract float64 parameter and convert to int
-func getIntParam(params map[string]interface{}, key string) (int, bool) {
-	value, ok := params[key].(float64)
-	if !ok {
-		// Try to convert from JSON number
-		if num, ok := params[key].(json.Number); ok {
-			if v, err := num.Int64(); err == nil {
-				return int(v), true
-			}
-		}
-		return 0, false
+	if val, ok := params[key].(string); ok {
+		return val, true
 	}
-	return int(value), true
+	return "", false
 }
 
-// Helper function to extract array of interface{} parameters
+// getIntParam safely extracts an int parameter from the params map
+func getIntParam(params map[string]interface{}, key string) (int, bool) {
+	switch v := params[key].(type) {
+	case int:
+		return v, true
+	case float64:
+		return int(v), true
+	case int64:
+		return int(v), true
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return int(i), true
+		}
+	}
+	return 0, false
+}
+
+// getArrayParam safely extracts an array parameter from the params map
 func getArrayParam(params map[string]interface{}, key string) ([]interface{}, bool) {
-	value, ok := params[key].([]interface{})
-	return value, ok
+	if val, ok := params[key].([]interface{}); ok {
+		return val, true
+	}
+	return nil, false
 }

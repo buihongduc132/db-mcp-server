@@ -1,0 +1,3 @@
+2025/03/25 23:30:10 Warning: Failed to initialize database connections: failed to connect to databases: failed to connect to database cashflow_db: failed to ping database: Error 1045 (28000): Access denied for user ''@'192.168.97.1' (using password: YES), db.Config{Type:"mysql", Host:"localhost", Port:3306, User:"", Password:"password", Name:"", MaxOpenConns:0, MaxIdleConns:0, ConnMaxLifetime:0, ConnMaxIdleTime:0}
+2025/03/25 23:30:10 Starting STDIO server
+2025/03/25 23:30:34 STDIO server error: context canceled

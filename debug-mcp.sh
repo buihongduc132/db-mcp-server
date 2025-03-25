@@ -28,4 +28,4 @@ export DEBUG=true
 
 # Execute the MCP server with stdio transport and redirect stderr to the log file
 # Note: We can't redirect stdout as it's needed for the stdio connection
-./mcp-server -t stdio 2> "$LOG_FILE" 
+./server -t stdio 2> "$LOG_FILE" 

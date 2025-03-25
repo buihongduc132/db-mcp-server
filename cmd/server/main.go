@@ -5,360 +5,323 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
-	"github.com/FreePeak/db-mcp-server/internal/config"
-	"github.com/FreePeak/db-mcp-server/internal/logger"
-	"github.com/FreePeak/db-mcp-server/internal/mcp"
-	"github.com/FreePeak/db-mcp-server/internal/session"
-	"github.com/FreePeak/db-mcp-server/internal/transport"
 	"github.com/FreePeak/db-mcp-server/pkg/dbtools"
-	"github.com/FreePeak/db-mcp-server/pkg/tools"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 )
 
-// Server represents the MCP server instance
-type Server struct {
-	registry       *tools.Registry
-	sessionManager *session.Manager
-	config         *config.Config
-	ready          bool
-	isCursor       bool
-}
+func main() {
+	// Parse command line flags
+	transportMode := flag.String("t", "", "Transport mode (sse or stdio)")
+	serverPort := flag.Int("p", 8080, "Server port")
+	configFile := flag.String("c", "config.json", "Path to database configuration file")
+	flag.Parse()
 
-// NewServer creates a new Server instance
-func NewServer(cfg *config.Config) (*Server, error) {
-	// Initialize session manager
-	sessionManager := session.NewManager()
+	// Set default transport mode if not specified
+	if *transportMode == "" {
+		*transportMode = "sse"
+	}
 
-	// Start session cleanup goroutine
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			sessionManager.CleanupSessions(30 * time.Minute)
-		}
-	}()
-
-	// Initialize tools registry
-	registry := tools.NewRegistry()
-
-	// Check if we're running in Cursor
-	isCursor := false
-	if cursorEnv := os.Getenv("CURSOR_EDITOR"); cursorEnv != "" {
-		isCursor = true
-		logger.Info("Running in Cursor editor environment")
+	// Configure logging
+	if *transportMode == "stdio" {
+		// In STDIO mode, explicitly redirect logs to stderr to avoid mixing with JSON responses
+		log.SetOutput(os.Stderr)
 	}
 
 	// Initialize database connections if not skipped
-	var dbInitError error
-	if cfg.TransportMode == "stdio" && os.Getenv("SKIP_DB") == "true" {
+	if *transportMode == "stdio" && os.Getenv("SKIP_DB") == "true" {
 		log.Printf("Skipping database initialization for STDIO mode with SKIP_DB=true")
 	} else {
-		dbInitError = dbtools.InitDatabase(cfg)
+		// Initialize database connections (configuration is loaded inside InitDatabase)
+		dbConfig := &dbtools.Config{
+			ConfigFile: *configFile,
+		}
+
+		dbInitError := dbtools.InitDatabase(dbConfig)
 		if dbInitError != nil {
 			log.Printf("Warning: Failed to initialize database connections: %v", dbInitError)
-		}
-	}
-
-	// Register database tools (even if db init failed, to allow testing)
-	if err := dbtools.RegisterDatabaseTools(registry); err != nil {
-		return nil, fmt.Errorf("failed to register database tools: %v", err)
-	}
-
-	// Verify database connections only if init didn't fail
-	if dbInitError == nil {
-		ctx := context.Background()
-		dbIDs := dbtools.ListDatabases()
-		if len(dbIDs) == 0 {
-			log.Printf("Warning: No database connections configured")
 		} else {
-			for _, dbID := range dbIDs {
-				db, err := dbtools.GetDatabase(dbID)
-				if err != nil {
-					log.Printf("Warning: Failed to get database %s: %v", dbID, err)
-					continue
-				}
-				if err := db.Ping(ctx); err != nil {
-					log.Printf("Warning: Failed to ping database %s: %v", dbID, err)
-				} else {
-					log.Printf("Successfully connected to database %s", dbID)
+			// Verify database connections
+			ctx := context.Background()
+			dbIDs := dbtools.ListDatabases()
+			if len(dbIDs) == 0 {
+				log.Printf("Warning: No database connections configured")
+			} else {
+				for _, dbID := range dbtools.ListDatabases() {
+					db, err := dbtools.GetDatabase(dbID)
+					if err != nil {
+						log.Printf("Warning: Failed to get database %s: %v", dbID, err)
+						continue
+					}
+					if err := db.Ping(ctx); err != nil {
+						log.Printf("Warning: Failed to ping database %s: %v", dbID, err)
+					} else {
+						log.Printf("Successfully connected to database %s", dbID)
+					}
 				}
 			}
 		}
 	}
 
-	server := &Server{
-		registry:       registry,
-		sessionManager: sessionManager,
-		config:         cfg,
-		ready:          true,
-		isCursor:       isCursor,
-	}
+	// Setup hooks for logging
+	hooks := server.Hooks{}
+	hooks.AddBeforeAny(func(id any, method mcp.MCPMethod, message any) {
+		log.Printf("Request: %s, %v", method, id)
+	})
+	hooks.AddOnError(func(id any, method mcp.MCPMethod, message any, err error) {
+		log.Printf("Error: %s, %v, %v", method, id, err)
+	})
 
-	return server, nil
-}
-
-func (s *Server) startSSEServer() error {
-	// Create SSE transport
-	basePath := fmt.Sprintf("http://localhost:%d", s.config.ServerPort)
-	sseTransport := transport.NewSSETransport(s.sessionManager, basePath)
-
-	// Create MCP handler with the tool registry
-	mcpHandler := mcp.NewHandler(s.registry)
-
-	// Register MCP handler with transport
-	for method, handler := range mcpHandler.GetAllMethodHandlers() {
-		sseTransport.RegisterMethodHandler(method, handler)
-	}
-
-	// Create HTTP server
-	mux := http.NewServeMux()
-	mux.Handle("/sse", http.HandlerFunc(sseTransport.HandleSSE))
-	mux.Handle("/message", http.HandlerFunc(sseTransport.HandleMessage))
-
-	// Create server with graceful shutdown
-	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.config.ServerPort),
-		Handler: mux,
-	}
-
-	// Channel to listen for errors coming from the server
-	serverErrors := make(chan error, 1)
-
-	// Start server
-	go func() {
-		logger.Info("Starting SSE server on port %d", s.config.ServerPort)
-		serverErrors <- srv.ListenAndServe()
-	}()
-
-	// Listen for interrupt signal
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-
-	// Wait for interrupt signal
-	select {
-	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
-	case <-stop:
-		logger.Info("Shutting down server...")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if err := srv.Shutdown(ctx); err != nil {
-			return fmt.Errorf("failed to shutdown server: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func (s *Server) startStdioServer() error {
-	// Create MCP handler with the tool registry
-	mcpHandler := mcp.NewHandler(s.registry)
-
-	// Create STDIO transport
-	stdioTransport := transport.NewStdioTransport(s.sessionManager)
-
-	// Register MCP handler with transport
-	for method, handler := range mcpHandler.GetAllMethodHandlers() {
-		stdioTransport.RegisterMethodHandler(method, handler)
-	}
-
-	// Log registered tools
-	tools := s.registry.GetAllTools()
-	if len(tools) > 0 {
-		toolNames := make([]string, 0, len(tools))
-		for _, tool := range tools {
-			toolNames = append(toolNames, tool.Name)
-		}
-		logger.Info("Registered tools: %v", toolNames)
-	} else {
-		logger.Warn("No tools registered")
-	}
-
-	// Special handling for Cursor
-	if s.isCursor {
-		logger.Info("Configured for Cursor editor - using optimized STDIO communication")
-		// Optionally add any Cursor-specific optimizations here
-	}
-
-	// Start the transport
-	if err := stdioTransport.Start(); err != nil {
-		return fmt.Errorf("failed to start STDIO transport: %w", err)
-	}
-
-	// Log that we've started
-	logger.Info("STDIO transport started, waiting for requests on stdin...")
-
-	// Create a channel for OS signals
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	// Wait for a signal
-	sig := <-sigs
-	logger.Info("Received signal %v, stopping server...", sig)
-
-	// Stop the transport
-	stdioTransport.Stop()
-
-	return nil
-}
-
-func main() {
-	// Parse command line flags
-	transportMode := flag.String("t", "", "Transport mode (sse or stdio)")
-	serverPort := flag.Int("port", 0, "Server port")
-	configFile := flag.String("config", "", "Path to database configuration file")
-	flag.Parse()
-
-	// Load configuration
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
-	}
-
-	// Check for Cursor environment to automatically set stdio mode
-	if cursorEnv := os.Getenv("CURSOR_EDITOR"); cursorEnv != "" {
-		// Force stdio mode for Cursor editor
-		cfg.TransportMode = "stdio"
-		log.Printf("Detected Cursor editor: forcing stdio transport mode")
-	}
-
-	// Initialize logger with debug level
-	if cfg.TransportMode == "stdio" {
-		// In STDIO mode, explicitly redirect logs to stderr to avoid mixing with JSON responses
-		logger.InitializeWithWriter("debug", os.Stderr)
-	} else {
-		logger.Initialize("debug")
-	}
-
-	// Override configuration with command line flags if provided
-	if *transportMode != "" {
-		cfg.TransportMode = *transportMode
-	}
-	if *serverPort != 0 {
-		cfg.ServerPort = *serverPort
-	}
-	if *configFile != "" {
-		cfg.DBConfigFile = *configFile
-	}
-
-	// Create server instance
-	server, err := NewServer(cfg)
-	if err != nil {
-		log.Fatalf("Failed to create server: %v", err)
-	}
-
-	// Handle transport mode
-	switch cfg.TransportMode {
-	case "sse":
-		log.Printf("Starting server in SSE mode on port %d", cfg.ServerPort)
-		if err := server.startSSEServer(); err != nil {
-			log.Fatalf("Server error: %v", err)
-		}
-	case "stdio":
-		log.Printf("Starting server in stdio mode")
-		if err := server.startStdioServer(); err != nil {
-			log.Fatalf("Server error: %v", err)
-		}
-	default:
-		log.Fatalf("Invalid transport mode: %s", cfg.TransportMode)
-	}
-}
-
-// startSSEServer starts the server using Server-Sent Events transport
-//
-//nolint:unused // Retained for future use
-func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHandler *mcp.Handler) error {
-	// Create SSE transport
-	basePath := fmt.Sprintf("http://localhost:%d", cfg.ServerPort)
-	sseTransport := transport.NewSSETransport(sessionManager, basePath)
-
-	// Register method handlers
-	methodHandlers := mcpHandler.GetAllMethodHandlers()
-	for method, handler := range methodHandlers {
-		sseTransport.RegisterMethodHandler(method, handler)
-	}
-
-	// Create HTTP server
-	mux := http.NewServeMux()
-
-	// Register SSE endpoint
-	mux.HandleFunc("/sse", sseTransport.HandleSSE)
-
-	// Register message endpoint
-	mux.HandleFunc("/message", sseTransport.HandleMessage)
-
-	// Create server
-	addr := fmt.Sprintf(":%d", cfg.ServerPort)
-	server := &http.Server{
-		Addr:    addr,
-		Handler: mux,
-	}
-
-	// Start server in a goroutine
-	go func() {
-		logger.Info("Server listening on %s", addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("Server error: %v", err)
-			os.Exit(1)
-		}
-	}()
-
-	// Wait for interrupt signal
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
-
-	// Shutdown server gracefully
-	logger.Info("Shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		logger.Error("Server shutdown error: %v", err)
-	}
-
-	logger.Info("Server stopped")
-	return nil
-}
-
-// registerDatabaseTools registers database tools with the MCP tool registry
-//
-//nolint:unused // Retained for future use
-func registerDatabaseTools(toolRegistry *tools.Registry, cfg *config.Config) error {
-	// Initialize database connections
-	if err := dbtools.InitDatabase(cfg); err != nil {
-		logger.Error("Failed to initialize databases: %v", err)
-		return fmt.Errorf("database initialization failed: %w", err)
-	}
+	// Create mcp-go server with hooks
+	mcpServer := server.NewMCPServer(
+		"DB MCP Server", // Server name
+		"1.0.0",         // Server version
+		server.WithHooks(&hooks),
+	)
 
 	// Register database tools
-	if err := dbtools.RegisterDatabaseTools(toolRegistry); err != nil {
-		logger.Error("Failed to register database tools: %v", err)
-		return fmt.Errorf("failed to register database tools: %w", err)
-	}
-	logger.Info("Database tools registered successfully")
+	registerDatabaseTools(mcpServer)
 
-	// Verify connections to all databases
-	for _, conn := range cfg.MultiDBConfig.Connections {
-		db, err := dbtools.GetDatabase(conn.ID)
-		if err != nil {
-			logger.Error("Failed to get database connection for %s: %v", conn.ID, err)
-			return fmt.Errorf("failed to get database connection for %s: %w", conn.ID, err)
+	// Handle transport mode
+	switch *transportMode {
+	case "sse":
+		log.Printf("Starting SSE server on port %d", *serverPort)
+
+		// Create SSE server
+		sseServer := server.NewSSEServer(
+			mcpServer,
+			server.WithBaseURL(fmt.Sprintf("http://localhost:%d", *serverPort)),
+		)
+
+		// Start the server with graceful shutdown
+		stop := make(chan os.Signal, 1)
+		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- sseServer.Start(fmt.Sprintf(":%d", *serverPort))
+		}()
+
+		// Wait for interrupt or error
+		select {
+		case err := <-errCh:
+			log.Fatalf("Server error: %v", err)
+		case <-stop:
+			log.Println("Shutting down server...")
+			// No explicit shutdown needed, just exit
 		}
 
-		if err := db.Ping(context.Background()); err != nil {
-			logger.Error("Failed to connect to database %s: %v", conn.ID, err)
-			return fmt.Errorf("failed to connect to database %s: %w", conn.ID, err)
+	case "stdio":
+		log.Printf("Starting STDIO server")
+		// No graceful shutdown needed for stdio
+		if err := server.ServeStdio(mcpServer); err != nil {
+			log.Fatalf("STDIO server error: %v", err)
 		}
-		logger.Info("Successfully connected to database %s (%s:%d)", conn.ID, conn.Host, conn.Port)
+
+	default:
+		log.Fatalf("Invalid transport mode: %s", *transportMode)
+	}
+}
+
+func registerDatabaseTools(mcpServer *server.MCPServer) {
+	// Get available database connections
+	dbIDs := dbtools.ListDatabases()
+
+	// If no database connections are available, register mock tools
+	if len(dbIDs) == 0 {
+		log.Printf("No active database connections. Registering mock database tools.")
+		// Register mock database tools
+		mcpServer.AddTool(
+			mcp.NewTool(
+				"mock_query",
+				mcp.WithDescription("Execute SQL query (mock)"),
+				mcp.WithString("query",
+					mcp.Description("SQL query to execute"),
+					mcp.Required(),
+				),
+				mcp.WithArray("params",
+					mcp.Description("Query parameters"),
+				),
+			),
+			func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				// Extract parameters
+				query, ok := request.Params.Arguments["query"].(string)
+				if !ok {
+					return nil, fmt.Errorf("query parameter must be a string")
+				}
+
+				// Return mock data
+				return mcp.NewToolResultText(fmt.Sprintf("Mock query execution: %s", query)), nil
+			},
+		)
+
+		mcpServer.AddTool(
+			mcp.NewTool(
+				"mock_execute",
+				mcp.WithDescription("Execute SQL statement (mock)"),
+				mcp.WithString("statement",
+					mcp.Description("SQL statement to execute"),
+					mcp.Required(),
+				),
+				mcp.WithArray("params",
+					mcp.Description("Statement parameters"),
+				),
+			),
+			func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				// Extract parameters
+				statement, ok := request.Params.Arguments["statement"].(string)
+				if !ok {
+					return nil, fmt.Errorf("statement parameter must be a string")
+				}
+
+				// Return mock data
+				return mcp.NewToolResultText(fmt.Sprintf("Mock statement execution: %s\nAffected rows: 1", statement)), nil
+			},
+		)
+
+		mcpServer.AddTool(
+			mcp.NewTool(
+				"mock_schema",
+				mcp.WithDescription("Get database schema (mock)"),
+				mcp.WithString("database",
+					mcp.Description("Database name"),
+				),
+				mcp.WithString("table",
+					mcp.Description("Table name"),
+				),
+			),
+			func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				// Return mock schema data
+				return mcp.NewToolResultText("Mock Schema:\n1. users\n2. orders\n3. products"), nil
+			},
+		)
+
+		// Register list databases tool (will return mock databases)
+		mcpServer.AddTool(
+			mcp.NewTool(
+				"list_databases",
+				mcp.WithDescription("List all available databases"),
+			),
+			func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				return mcp.NewToolResultText("Available databases: [mock_db] (MOCK)"), nil
+			},
+		)
+
+		return
 	}
 
-	return nil
+	// Register real database tools
+	for _, dbID := range dbIDs {
+		// Create a closure to preserve the dbID
+		func(id string) {
+			// Register query tool
+			mcpServer.AddTool(
+				mcp.NewTool(
+					fmt.Sprintf("query_%s", id),
+					mcp.WithDescription(fmt.Sprintf("Execute SQL query on %s database", id)),
+					mcp.WithString("query",
+						mcp.Description("SQL query to execute"),
+						mcp.Required(),
+					),
+					mcp.WithArray("params",
+						mcp.Description("Query parameters"),
+					),
+				),
+				func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					// Extract parameters
+					query, ok := request.Params.Arguments["query"].(string)
+					if !ok {
+						return nil, fmt.Errorf("query parameter must be a string")
+					}
+
+					var queryParams []interface{}
+					if request.Params.Arguments["params"] != nil {
+						if paramsArr, ok := request.Params.Arguments["params"].([]interface{}); ok {
+							queryParams = paramsArr
+						}
+					}
+
+					// Get database and execute query
+					db, err := dbtools.GetDatabase(id)
+					if err != nil {
+						return nil, fmt.Errorf("failed to get database: %v", err)
+					}
+
+					// Execute query
+					result, err := db.Query(ctx, query, queryParams...)
+					if err != nil {
+						return nil, fmt.Errorf("query execution failed: %v", err)
+					}
+
+					return mcp.NewToolResultText(fmt.Sprintf("%v", result)), nil
+				},
+			)
+
+			// Register schema tool
+			mcpServer.AddTool(
+				mcp.NewTool(
+					fmt.Sprintf("schema_%s", id),
+					mcp.WithDescription(fmt.Sprintf("Get schema of %s database", id)),
+				),
+				func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+					// Get database
+					db, err := dbtools.GetDatabase(id)
+					if err != nil {
+						return nil, fmt.Errorf("failed to get database: %v", err)
+					}
+
+					// Query for schema information
+					query := "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+
+					// For MySQL, use a different query
+					if db.DriverName() == "mysql" {
+						query = "SHOW TABLES"
+					}
+
+					rows, err := db.Query(ctx, query)
+					if err != nil {
+						return nil, fmt.Errorf("failed to get schema: %v", err)
+					}
+					defer rows.Close()
+
+					// Build a list of table names
+					var tables []string
+					for rows.Next() {
+						var tableName string
+						if err := rows.Scan(&tableName); err != nil {
+							return nil, fmt.Errorf("failed to scan table name: %v", err)
+						}
+						tables = append(tables, tableName)
+					}
+
+					if err := rows.Err(); err != nil {
+						return nil, fmt.Errorf("error iterating tables: %v", err)
+					}
+
+					// Format the result
+					schemaInfo := fmt.Sprintf("Database: %s\nTables: %d\n\n", id, len(tables))
+					for i, table := range tables {
+						schemaInfo += fmt.Sprintf("%d. %s\n", i+1, table)
+					}
+
+					return mcp.NewToolResultText(schemaInfo), nil
+				},
+			)
+		}(dbID)
+	}
+
+	// Register list databases tool
+	mcpServer.AddTool(
+		mcp.NewTool(
+			"list_databases",
+			mcp.WithDescription("List all available databases"),
+		),
+		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultText(fmt.Sprintf("Available databases: %v", dbtools.ListDatabases())), nil
+		},
+	)
 }

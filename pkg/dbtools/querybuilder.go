@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/FreePeak/db-mcp-server/internal/logger"
 	"github.com/FreePeak/db-mcp-server/pkg/db"
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
@@ -570,37 +571,57 @@ func getSuggestionForError(errorMsg string) string {
 	return "Review the query syntax and structure"
 }
 
-// getErrorLineFromMessage extracts the line number from an error message
-// nolint:unused
-func getErrorLineFromMessage(errorMsg string) int {
-	// MySQL format: "ERROR at line 1"
-	// PostgreSQL format: "LINE 2:"
-	if strings.Contains(errorMsg, "line") {
-		parts := strings.Split(errorMsg, "line")
-		if len(parts) > 1 {
-			var lineNum int
-			_, scanErr := fmt.Sscanf(parts[1], " %d", &lineNum)
+// extractLineNumberFromError extracts line number from a database error message
+func extractLineNumberFromError(errMsg string) int {
+	// Check for line number patterns like "at line 42" or "line 42"
+	linePatterns := []string{
+		"at line ([0-9]+)",
+		"line ([0-9]+)",
+		"LINE ([0-9]+)",
+	}
+
+	for _, pattern := range linePatterns {
+		lineMatch := regexp.MustCompile(pattern).FindStringSubmatch(errMsg)
+		if len(lineMatch) > 1 {
+			lineNum, scanErr := strconv.Atoi(lineMatch[1])
 			if scanErr != nil {
-				logger.Warn("Failed to parse line number: %v", scanErr)
+				log.Printf("Failed to parse line number: %v", scanErr)
+				continue
 			}
 			return lineNum
 		}
 	}
+
 	return 0
 }
 
-// getErrorColumnFromMessage extracts the column/position number from an error message
-// nolint:unused
-func getErrorColumnFromMessage(errorMsg string) int {
-	// PostgreSQL format: "LINE 1: SELECT * FROM ^ [position: 14]"
-	if strings.Contains(errorMsg, "position:") {
-		var position int
-		_, scanErr := fmt.Sscanf(errorMsg, "%*s position: %d", &position)
-		if scanErr != nil {
-			logger.Warn("Failed to parse position: %v", scanErr)
-		}
-		return position
+// extractPositionFromError extracts position from a database error message
+func extractPositionFromError(errMsg string) int {
+	// Check for position patterns
+	posPatterns := []string{
+		"at character ([0-9]+)",
+		"position ([0-9]+)",
+		"at or near \"([^\"]+)\"",
 	}
+
+	for _, pattern := range posPatterns {
+		posMatch := regexp.MustCompile(pattern).FindStringSubmatch(errMsg)
+		if len(posMatch) > 1 {
+			// For "at or near X" patterns, need to find X in the query
+			if strings.Contains(pattern, "at or near") {
+				return 0 // Just return 0 for now
+			}
+
+			// For numeric positions
+			pos, scanErr := strconv.Atoi(posMatch[1])
+			if scanErr != nil {
+				log.Printf("Failed to parse position: %v", scanErr)
+				continue
+			}
+			return pos
+		}
+	}
+
 	return 0
 }
 

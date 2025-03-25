@@ -1,0 +1,5 @@
+2025/03/25 22:49:42 Warning: Failed to initialize database connections: no database configuration provided
+2025/03/25 22:49:42 Starting STDIO server
+2025/03/25 22:49:42 Request: initialize, 0
+2025/03/25 22:49:42 Request: tools/list, 1
+2025/03/25 22:53:08 Request: tools/call, 2

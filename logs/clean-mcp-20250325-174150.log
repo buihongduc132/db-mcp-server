@@ -1,0 +1,11 @@
+Starting MCP server at Tue Mar 25 17:41:50 +07 2025
+Loaded environment from .env
+Executing MCP server with stdio transport
+2025/03/25 17:41:50 Loaded configuration from .env file
+2025/03/25 17:41:50 Warning: Failed to initialize database connections: failed to load database config: unsupported database type for connection cashflow_sqlite: sqlite
+2025/03/25 17:41:50 Starting server in stdio mode
+2025/03/25 17:41:50.930 [32mINFO[0m: Registered tools: [dbQuery dbExecute dbTransaction dbPerformanceAnalyzer showConnectedDatabases dbSchema]
+2025/03/25 17:41:50.930 [32mINFO[0m: STDIO transport starting, waiting for requests on stdin...
+2025/03/25 17:41:50.930 [36mDEBUG[0m: Created new session: 49059d28-2f3e-499d-8075-c9bb33c58bcb
+2025/03/25 17:41:50.930 [32mINFO[0m: Created new STDIO session 49059d28-2f3e-499d-8075-c9bb33c58bcb
+2025/03/25 17:41:55 Server error: context canceled

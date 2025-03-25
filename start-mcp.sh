@@ -7,6 +7,10 @@ TRANSPORT="stdio"
 PORT=8080
 CONFIG=""
 CURSOR_MODE=0
+LOG_FILE="logs/mcp-$(date +%Y%m%d-%H%M%S).log"
+
+# Create logs directory if it doesn't exist
+mkdir -p logs
 
 # Display usage information
 usage() {
@@ -74,14 +78,20 @@ if [[ $CURSOR_MODE -eq 1 ]]; then
     echo "Starting database MCP server in Cursor mode" >&2
 else
     echo "Starting database MCP server with transport: $TRANSPORT" >&2
+    echo "Logs will be stored in: $LOG_FILE" >&2
 fi
 
 # Execute the server
 if [[ -f "./server" ]]; then
-    exec ./server $ARGS
-elif [[ -f "./mcp-server" ]]; then
-    exec ./mcp-server $ARGS
+    # In Cursor mode, we don't need to redirect logs
+    if [[ $CURSOR_MODE -eq 1 ]]; then
+        exec ./server $ARGS
+    else
+        # For normal mode, redirect stderr to a log file for debugging
+        exec ./server $ARGS 2> >(tee -a "$LOG_FILE" >&2)
+    fi
 else
-    echo "Error: Server executable not found." >&2
+    echo "Error: Server executable 'server' not found." >&2
+    echo "Please build the server first with 'make build'" >&2
     exit 1
 fi
