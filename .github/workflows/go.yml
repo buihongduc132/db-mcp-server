@@ -48,14 +48,6 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v3
 
-    - name: Create fixed dependency
-      run: |
-        mkdir -p hack/mcp-go
-        git clone https://github.com/mark3labs/mcp-go.git hack/mcp-go
-        cd hack/mcp-go
-        sed -i 's/go 1.23/go 1.22/' go.mod
-        cd ../..
-
     - name: Update go.mod
       run: |
         go mod edit -go=1.22
