@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"math/rand"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,32 +20,137 @@ import (
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
+// Server represents the MCP server instance
+type Server struct {
+	registry       *tools.Registry
+	sessionManager *session.Manager
+	config         *config.Config
+}
+
+func (s *Server) startSSEServer() error {
+	// Create SSE transport
+	basePath := fmt.Sprintf("http://localhost:%d", s.config.ServerPort)
+	sseTransport := transport.NewSSETransport(s.sessionManager, basePath)
+
+	// Create MCP handler with the tool registry
+	mcpHandler := mcp.NewHandler(s.registry)
+
+	// Register MCP handler with transport
+	for method, handler := range mcpHandler.GetAllMethodHandlers() {
+		sseTransport.RegisterMethodHandler(method, handler)
+	}
+
+	// Create HTTP server
+	mux := http.NewServeMux()
+	mux.Handle("/sse", http.HandlerFunc(sseTransport.HandleSSE))
+	mux.Handle("/message", http.HandlerFunc(sseTransport.HandleMessage))
+
+	// Create server with graceful shutdown
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%d", s.config.ServerPort),
+		Handler: mux,
+	}
+
+	// Channel to listen for errors coming from the server
+	serverErrors := make(chan error, 1)
+
+	// Start server
+	go func() {
+		serverErrors <- srv.ListenAndServe()
+	}()
+
+	// Listen for interrupt signal
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt)
+
+	// Wait for interrupt signal
+	select {
+	case err := <-serverErrors:
+		return fmt.Errorf("server error: %w", err)
+	case <-stop:
+		logger.Info("Shutting down server...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(ctx); err != nil {
+			return fmt.Errorf("failed to shutdown server: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (s *Server) startStdioServer() error {
+	// Create MCP handler with the tool registry
+	mcpHandler := mcp.NewHandler(s.registry)
+
+	// Create STDIO transport
+	stdioTransport := transport.NewStdioTransport(s.sessionManager)
+
+	// Register MCP handler with transport
+	for method, handler := range mcpHandler.GetAllMethodHandlers() {
+		stdioTransport.RegisterMethodHandler(method, handler)
+	}
+
+	// Start the transport
+	if err := stdioTransport.Start(); err != nil {
+		return fmt.Errorf("failed to start STDIO transport: %w", err)
+	}
+
+	// Log that we've started
+	logger.Info("STDIO transport started, waiting for requests on stdin...")
+
+	// Create a channel for OS signals
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	// Wait for a signal
+	<-sigs
+	logger.Info("Received shutdown signal, stopping server...")
+
+	// Stop the transport
+	stdioTransport.Stop()
+
+	return nil
+}
+
 func main() {
 	// Initialize random number generator
-	rand.New(rand.NewSource(time.Now().UnixNano()))
+	// As of Go 1.20, rand.Seed is no longer necessary
 
 	// Parse command line flags
 	transportMode := flag.String("t", "", "Transport mode (sse or stdio)")
-	port := flag.Int("port", 9092, "Server port")
+	serverPort := flag.Int("port", 0, "Server port")
+	configFile := flag.String("config", "", "Path to database configuration file")
 	flag.Parse()
 
 	// Load configuration
-	cfg := config.LoadConfig()
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
 
-	// Override config with command line flags if provided
+	// Initialize logger with debug level
+	if cfg.TransportMode == "stdio" {
+		// In STDIO mode, explicitly redirect logs to stderr to avoid mixing with JSON responses
+		logger.InitializeWithWriter("debug", os.Stderr)
+	} else {
+		logger.Initialize("debug")
+	}
+
+	// Override configuration with command line flags if provided
 	if *transportMode != "" {
 		cfg.TransportMode = *transportMode
 	}
-	cfg.ServerPort = *port
+	if *serverPort != 0 {
+		cfg.ServerPort = *serverPort
+	}
+	if *configFile != "" {
+		cfg.DBConfigFile = *configFile
+	}
 
-	// Initialize logger
-	logger.Initialize(cfg.LogLevel)
-	logger.Info("Starting MCP server with %s transport on port %d", cfg.TransportMode, cfg.ServerPort)
-
-	// Create session manager
+	// Initialize session manager
 	sessionManager := session.NewManager()
-
-	// Start session cleanup goroutine
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -55,38 +160,75 @@ func main() {
 		}
 	}()
 
-	// Create tool registry
-	toolRegistry := tools.NewRegistry()
+	// Initialize tools registry
+	registry := tools.NewRegistry()
 
-	// Create MCP handler with the tool registry
-	mcpHandler := mcp.NewHandler(toolRegistry)
-
-	// Register database tools
-	logger.Info("Registering database tools...")
-	registerDatabaseTools(toolRegistry)
-
-	// Verify tools were registered
-	registeredTools := mcpHandler.ListAvailableTools()
-	if registeredTools == "none" {
-		logger.Error("No tools were registered! Tools won't be available to clients.")
+	// Initialize database connections
+	var dbInitError error
+	if cfg.TransportMode == "stdio" && os.Getenv("SKIP_DB") == "true" {
+		log.Printf("Skipping database initialization for STDIO mode with SKIP_DB=true")
 	} else {
-		logger.Info("Successfully registered tools: %s", registeredTools)
+		dbInitError = dbtools.InitDatabase(cfg)
+		if dbInitError != nil {
+			log.Printf("Warning: Failed to initialize database connections: %v", dbInitError)
+		}
 	}
 
-	// Create and configure the server based on transport mode
+	// Register database tools (even if db init failed, to allow testing)
+	if err := dbtools.RegisterDatabaseTools(registry); err != nil {
+		log.Fatalf("Failed to register database tools: %v", err)
+	}
+
+	// Verify database connections only if init didn't fail
+	if dbInitError == nil {
+		ctx := context.Background()
+		dbIDs := dbtools.ListDatabases()
+		if len(dbIDs) == 0 {
+			log.Printf("Warning: No database connections configured")
+		} else {
+			for _, dbID := range dbIDs {
+				db, err := dbtools.GetDatabase(dbID)
+				if err != nil {
+					log.Printf("Warning: Failed to get database %s: %v", dbID, err)
+					continue
+				}
+				if err := db.Ping(ctx); err != nil {
+					log.Printf("Warning: Failed to ping database %s: %v", dbID, err)
+				} else {
+					log.Printf("Successfully connected to database %s", dbID)
+				}
+			}
+		}
+	}
+
+	// Create server instance
+	server := &Server{
+		registry:       registry,
+		sessionManager: sessionManager,
+		config:         cfg,
+	}
+
+	// Handle transport mode
 	switch cfg.TransportMode {
 	case "sse":
-		startSSEServer(cfg, sessionManager, mcpHandler)
+		log.Printf("Starting server in SSE mode on port %d", cfg.ServerPort)
+		if err := server.startSSEServer(); err != nil {
+			log.Fatalf("Server error: %v", err)
+		}
 	case "stdio":
-		logger.Info("stdio transport not implemented yet")
-		os.Exit(1)
+		log.Printf("Starting server in stdio mode")
+		if err := server.startStdioServer(); err != nil {
+			log.Fatalf("Server error: %v", err)
+		}
 	default:
-		logger.Error("Unknown transport mode: %s", cfg.TransportMode)
-		os.Exit(1)
+		log.Fatalf("Invalid transport mode: %s", cfg.TransportMode)
 	}
 }
 
-func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHandler *mcp.Handler) {
+// startSSEServer starts the server using Server-Sent Events transport
+//
+//nolint:unused // Retained for future use
+func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHandler *mcp.Handler) error {
 	// Create SSE transport
 	basePath := fmt.Sprintf("http://localhost:%d", cfg.ServerPort)
 	sseTransport := transport.NewSSETransport(sessionManager, basePath)
@@ -137,27 +279,40 @@ func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHand
 	}
 
 	logger.Info("Server stopped")
+	return nil
 }
 
-func registerDatabaseTools(toolRegistry *tools.Registry) {
-	// Initialize database connection
-	cfg := config.LoadConfig()
-
-	// Try to initialize database
-	err := dbtools.InitDatabase(cfg)
-	if err != nil {
-		logger.Error("Failed to initialize database: %v", err)
-		logger.Warn("Using mock database tools")
-
-		// Register all tools with mock implementations
-		dbtools.RegisterMockDatabaseTools(toolRegistry)
-		logger.Info("Mock database tools registered successfully")
-		return
+// registerDatabaseTools registers database tools with the MCP tool registry
+//
+//nolint:unused // Retained for future use
+func registerDatabaseTools(toolRegistry *tools.Registry, cfg *config.Config) error {
+	// Initialize database connections
+	if err := dbtools.InitDatabase(cfg); err != nil {
+		logger.Error("Failed to initialize databases: %v", err)
+		return fmt.Errorf("database initialization failed: %w", err)
 	}
 
-	// If database connection succeeded, register all database tools
-	dbtools.RegisterDatabaseTools(toolRegistry)
-
-	// Log success
+	// Register database tools
+	if err := dbtools.RegisterDatabaseTools(toolRegistry); err != nil {
+		logger.Error("Failed to register database tools: %v", err)
+		return fmt.Errorf("failed to register database tools: %w", err)
+	}
 	logger.Info("Database tools registered successfully")
+
+	// Verify connections to all databases
+	for _, conn := range cfg.MultiDBConfig.Connections {
+		db, err := dbtools.GetDatabase(conn.ID)
+		if err != nil {
+			logger.Error("Failed to get database connection for %s: %v", conn.ID, err)
+			return fmt.Errorf("failed to get database connection for %s: %w", conn.ID, err)
+		}
+
+		if err := db.Ping(context.Background()); err != nil {
+			logger.Error("Failed to connect to database %s: %v", conn.ID, err)
+			return fmt.Errorf("failed to connect to database %s: %w", conn.ID, err)
+		}
+		logger.Info("Successfully connected to database %s (%s:%d)", conn.ID, conn.Host, conn.Port)
+	}
+
+	return nil
 }

@@ -73,17 +73,37 @@ cd db-mcp-server
 cp .env.example .env
 # Edit .env with your configuration
 
-# Option 1: Build and run locally
+# Option 1: Build and run locally with SSE transport (default)
 make build
 ./mcp-server
 
-# Option 2: Using Docker
+# Option 2: Build and run with STDIO transport
+make build
+./mcp-server -t stdio
+
+# Option 3: Using Docker
 docker build -t db-mcp-server .
 docker run -p 9090:9090 db-mcp-server
 
-# Option 3: Using Docker Compose (with MySQL)
+# Option 4: Using Docker Compose (with MySQL)
 docker-compose up -d
 ```
+
+### Transport Modes
+
+The server supports two transport modes:
+
+1. **SSE (Server-Sent Events)** - Default mode for browser and HTTP clients
+   ```bash
+   ./mcp-server -t sse
+   ```
+
+2. **STDIO (Standard Input/Output)** - For command-line tools and integrations
+   ```bash
+   ./mcp-server -t stdio
+   ```
+   
+For STDIO mode, see the [examples directory](./examples) for usage examples.
 
 ### Docker
 
@@ -175,54 +195,6 @@ The MCP Server enhances AI assistant capabilities with:
 "Help me create a transaction that updates inventory levels when an order is placed"
 ```
 
-### Custom Tool Registration (Server-side)
-
-```go
-// Go example
-package main
-
-import (
-	"context"
-	"db-mcpserver/internal/mcp"
-)
-
-func main() {
-	// Create a custom database tool that AI agents can discover and use
-	queryTool := &mcp.Tool{
-		Name:        "dbQuery",
-		Description: "Executes read-only SQL queries with parameterized inputs",
-		InputSchema: mcp.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"query": {
-					"type":        "string",
-					"description": "SQL query to execute",
-				},
-				"params": {
-					"type":        "array",
-					"description": "Query parameters",
-					"items": map[string]interface{}{
-						"type": "any",
-					},
-				},
-				"timeout": {
-					"type":        "integer",
-					"description": "Query timeout in milliseconds (optional)",
-				},
-			},
-			Required: []string{"query"},
-		},
-		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-			// Implementation...
-			return result, nil
-		},
-	}
-
-	// Register the tool
-	toolRegistry.RegisterTool(queryTool)
-}
-```
-
 ## 📚 Documentation
 
 ### DB MCP Protocol for AI Integration
@@ -262,6 +234,127 @@ The server includes AI-optimized database tools that provide rich context and ca
 | `dbSchema` | Auto-discovers database structure and relationships | Provides AI with complete schema context for reasoning |
 | `dbQueryBuilder` | Visual SQL query construction with syntax validation | Helps AI create syntactically correct queries |
 | `dbPerformanceAnalyzer` | Identifies slow queries and provides optimization suggestions | Enables AI to suggest performance improvements |
+| `showConnectedDatabases` | Shows information about all connected databases | Enables AI to understand available database connections and their status |
+
+### Multiple Database Support
+
+DB MCP Server supports connecting to multiple databases simultaneously, allowing AI agents to work across different database systems in a unified way. Each database connection is identified by a unique ID that can be referenced when using database tools.
+
+#### Configuring Multiple Databases
+In your .env file
+```
+# Multi-Database Configuration
+DB_CONFIG_FILE=config/databases.json
+```
+Configure multiple database connections in your `db-mcp-server/config/databases.json` file or environment variables:
+
+```
+# Multiple Database Configuration
+{
+  "connections": [
+    {
+      "id": "mysql1",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 13306,
+      "user": "user1",
+      "password": "password1",
+      "name": "db1"
+    },
+    {
+      "id": "mysql2",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 13307,
+      "user": "user3",
+      "password": "password3",
+      "name": "db3"
+    },
+    {
+      "id": "postgres1",
+      "type": "postgres",
+      "host": "localhost",
+      "port": 15432,
+      "user": "user2",
+      "password": "password2",
+      "name": "db2"
+    }
+  ]
+} 
+```
+
+#### Viewing Connected Databases
+
+Use the `showConnectedDatabases` tool to see all connected databases with their status and connection information:
+
+```json
+// Get information about all connected databases
+{
+  "name": "showConnectedDatabases"
+}
+```
+
+Example response:
+
+```json
+[
+  {
+    "id": "mysql1",
+    "type": "mysql",
+    "host": "localhost",
+    "port": 3306,
+    "database": "db1",
+    "status": "connected",
+    "latency": "1.2ms"
+  },
+  {
+    "id": "postgres1",
+    "type": "postgres",
+    "host": "localhost",
+    "port": 5432,
+    "database": "db2",
+    "status": "connected",
+    "latency": "0.8ms"
+  }
+]
+```
+
+#### Specifying Database for Operations
+
+When using database tools, you must specify which database to use with the `database` parameter:
+
+```json
+// Query a specific database by ID
+{
+  "name": "dbQuery",
+  "arguments": {
+    "database": "postgres1",
+    "query": "SELECT * FROM users LIMIT 10"
+  }
+}
+
+// Execute statement on a specific database
+{
+  "name": "dbExecute",
+  "arguments": {
+    "database": "mysql2",
+    "statement": "UPDATE products SET stock = stock - 1 WHERE id = 5"
+  }
+}
+
+// Get schema from a specific database
+{
+  "name": "dbSchema",
+  "arguments": {
+    "database": "mysql1",
+    "component": "tables"
+  }
+}
+```
+
+> **Note**: Always use `database` as the parameter name when specifying which database to use. This is required for all database operation tools.
+
+If your configuration has only one database connection, you must still provide the database ID that matches the ID in your configuration.
 
 ### Database Schema Explorer Tool
 
@@ -272,6 +365,7 @@ The MCP Server includes an AI-aware Database Schema Explorer tool (`dbSchema`) t
 {
   "name": "dbSchema",
   "arguments": {
+    "database": "mysql1",
     "component": "tables"
   }
 }
@@ -280,6 +374,7 @@ The MCP Server includes an AI-aware Database Schema Explorer tool (`dbSchema`) t
 {
   "name": "dbSchema",
   "arguments": {
+    "database": "postgres1",
     "component": "columns",
     "table": "users"
   }
@@ -289,6 +384,7 @@ The MCP Server includes an AI-aware Database Schema Explorer tool (`dbSchema`) t
 {
   "name": "dbSchema",
   "arguments": {
+    "database": "mysql1",
     "component": "relationships",
     "table": "orders"
   }
@@ -298,6 +394,7 @@ The MCP Server includes an AI-aware Database Schema Explorer tool (`dbSchema`) t
 {
   "name": "dbSchema",
   "arguments": {
+    "database": "postgres1",
     "component": "full"
   }
 }
@@ -314,6 +411,7 @@ The MCP Server includes a powerful Visual Query Builder tool (`dbQueryBuilder`) 
 {
   "name": "dbQueryBuilder",
   "arguments": {
+    "database": "mysql1",
     "action": "validate",
     "query": "SELECT * FROM users WHERE status = 'active'"
   }
@@ -323,6 +421,7 @@ The MCP Server includes a powerful Visual Query Builder tool (`dbQueryBuilder`) 
 {
   "name": "dbQueryBuilder",
   "arguments": {
+    "database": "postgres1",
     "action": "build",
     "components": {
       "select": ["id", "name", "email"],
@@ -349,6 +448,7 @@ The MCP Server includes a powerful Visual Query Builder tool (`dbQueryBuilder`) 
 {
   "name": "dbQueryBuilder",
   "arguments": {
+    "database": "mysql1",
     "action": "analyze",
     "query": "SELECT u.*, o.* FROM users u JOIN orders o ON u.id = o.user_id WHERE u.status = 'active' AND o.created_at > '2023-01-01'"
   }
@@ -400,6 +500,7 @@ The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnal
 {
   "name": "dbPerformanceAnalyzer",
   "arguments": {
+    "database": "mysql1",
     "action": "getSlowQueries",
     "limit": 5
   }
@@ -409,6 +510,7 @@ The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnal
 {
   "name": "dbPerformanceAnalyzer",
   "arguments": {
+    "database": "postgres1",
     "action": "getMetrics",
     "limit": 10
   }
@@ -418,6 +520,7 @@ The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnal
 {
   "name": "dbPerformanceAnalyzer",
   "arguments": {
+    "database": "mysql1",
     "action": "analyzeQuery",
     "query": "SELECT * FROM orders JOIN users ON orders.user_id = users.id WHERE orders.status = 'pending'"
   }
@@ -427,6 +530,7 @@ The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnal
 {
   "name": "dbPerformanceAnalyzer",
   "arguments": {
+    "database": "postgres1",
     "action": "reset"
   }
 }
@@ -435,6 +539,7 @@ The MCP Server includes a powerful Performance Analyzer tool (`dbPerformanceAnal
 {
   "name": "dbPerformanceAnalyzer",
   "arguments": {
+    "database": "mysql1",
     "action": "setThreshold",
     "threshold": 300
   }
@@ -490,6 +595,54 @@ The Performance Analyzer automatically tracks all query executions and provides:
 - Optimization suggestions
 - Performance trend monitoring
 - Configurable slow query thresholds
+
+### Database Transactions Tool
+
+For operations that require transaction support, use the `dbTransaction` tool:
+
+```json
+// Begin a transaction
+{
+  "name": "dbTransaction",
+  "arguments": {
+    "database": "mysql1",
+    "action": "begin",
+    "readOnly": false
+  }
+}
+
+// Execute a statement within the transaction
+{
+  "name": "dbTransaction",
+  "arguments": {
+    "database": "mysql1",
+    "action": "execute",
+    "transactionId": "tx-1684785421293", // ID returned from the begin operation
+    "statement": "INSERT INTO orders (customer_id, amount) VALUES (?, ?)",
+    "params": ["123", "450.00"]
+  }
+}
+
+// Commit the transaction
+{
+  "name": "dbTransaction",
+  "arguments": {
+    "database": "mysql1",
+    "action": "commit",
+    "transactionId": "tx-1684785421293"
+  }
+}
+
+// Rollback the transaction (in case of errors)
+{
+  "name": "dbTransaction",
+  "arguments": {
+    "database": "mysql1",
+    "action": "rollback",
+    "transactionId": "tx-1684785421293"
+  }
+}
+```
 
 ### Editor Integration
 

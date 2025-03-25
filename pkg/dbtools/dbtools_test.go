@@ -197,3 +197,14 @@ func TestExec(t *testing.T) {
 	mockDB.AssertExpectations(t)
 	mockResult.AssertExpectations(t)
 }
+
+// TODO: Add tests for showConnectedDatabases
+// Note: Testing showConnectedDatabases requires proper mocking of the database manager
+// and related functions. This should be implemented with proper dependency injection
+// to make the function more testable without having to rely on global variables.
+//
+// The test should verify:
+// 1. That connected databases are correctly reported with status "connected"
+// 2. That failed database connections are reported with status "disconnected"
+// 3. That latency measurements are included in the response
+// 4. That it works with multiple database connections

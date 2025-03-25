@@ -1,0 +1,40 @@
+{
+  "connections": [
+    {
+      "id": "mysql1",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 13306,
+      "user": "user1",
+      "password": "password1",
+      "name": "db1"
+    },
+    {
+      "id": "mysql2",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 13307,
+      "user": "user3",
+      "password": "password3",
+      "name": "db3"
+    },
+    {
+      "id": "postgres1",
+      "type": "postgres",
+      "host": "localhost",
+      "port": 15432,
+      "user": "user2",
+      "password": "password2",
+      "name": "db2"
+    },
+    {
+      "id": "cashflow_db",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 3306,
+      "user": "iamrevisto",
+      "password": "password",
+      "name": "revisto"
+    }
+  ]
+} 

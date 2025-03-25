@@ -1,6 +1,7 @@
 package dbtools
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -22,109 +23,278 @@ const (
 	Postgres DatabaseType = "postgres"
 )
 
-// Database connection instance (singleton)
+// Database connection manager (singleton)
 var (
-	dbInstance db.Database
-	dbConfig   *db.Config
+	dbManager *db.Manager
 )
 
-// InitDatabase initializes the database connection
+// DatabaseConnectionInfo represents detailed information about a database connection
+type DatabaseConnectionInfo struct {
+	ID       string       `json:"id"`
+	Type     DatabaseType `json:"type"`
+	Host     string       `json:"host"`
+	Port     int          `json:"port"`
+	Database string       `json:"database"`
+	Status   string       `json:"status"`
+	Latency  string       `json:"latency,omitempty"`
+}
+
+// InitDatabase initializes the database connections
 func InitDatabase(cfg *config.Config) error {
-	// Create database config from app config
-	dbConfig = &db.Config{
-		Type:            cfg.DBConfig.Type,
-		Host:            cfg.DBConfig.Host,
-		Port:            cfg.DBConfig.Port,
-		User:            cfg.DBConfig.User,
-		Password:        cfg.DBConfig.Password,
-		Name:            cfg.DBConfig.Name,
-		MaxOpenConns:    25,
-		MaxIdleConns:    5,
-		ConnMaxLifetime: 5 * time.Minute,
-		ConnMaxIdleTime: 5 * time.Minute,
+	// Create database manager
+	dbManager = db.NewDBManager()
+
+	// Load configurations
+	if cfg.MultiDBConfig != nil {
+		// Convert config to JSON for loading
+		configJSON, err := json.Marshal(cfg.MultiDBConfig)
+		if err != nil {
+			return fmt.Errorf("failed to marshal database config: %w", err)
+		}
+
+		if err := dbManager.LoadConfig(configJSON); err != nil {
+			return fmt.Errorf("failed to load database config: %w", err)
+		}
+
+		// Connect to all databases
+		if err := dbManager.Connect(); err != nil {
+			return fmt.Errorf("failed to connect to databases: %w", err)
+		}
+
+		// Log connected databases
+		dbs := dbManager.ListDatabases()
+		log.Printf("Connected to %d databases: %v", len(dbs), dbs)
+	} else {
+		return fmt.Errorf("no database configuration provided")
 	}
-
-	// Create database instance
-	database, err := db.NewDatabase(*dbConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create database instance: %w", err)
-	}
-
-	// Connect to the database
-	if err := database.Connect(); err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
-	}
-
-	dbInstance = database
-	log.Printf("Connected to %s database at %s:%d/%s",
-		dbConfig.Type, dbConfig.Host, dbConfig.Port, dbConfig.Name)
-
-	// Initialize the performance analyzer
-	InitPerformanceAnalyzer()
 
 	return nil
 }
 
-// CloseDatabase closes the database connection
+// CloseDatabase closes all database connections
 func CloseDatabase() error {
-	if dbInstance == nil {
+	if dbManager == nil {
 		return nil
 	}
-	return dbInstance.Close()
+	return dbManager.Close()
 }
 
-// GetDatabase returns the database instance
-func GetDatabase() db.Database {
-	return dbInstance
+// GetDatabase returns a database instance by ID
+func GetDatabase(id string) (db.Database, error) {
+	if dbManager == nil {
+		return nil, fmt.Errorf("database manager not initialized")
+	}
+	return dbManager.GetDB(id)
+}
+
+// ListDatabases returns a list of available database connections
+func ListDatabases() []string {
+	if dbManager == nil {
+		return nil
+	}
+	return dbManager.ListDatabases()
+}
+
+// showConnectedDatabases returns information about all connected databases
+func showConnectedDatabases(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	if dbManager == nil {
+		return nil, fmt.Errorf("database manager not initialized")
+	}
+
+	var connections []DatabaseConnectionInfo
+	dbIDs := ListDatabases()
+
+	for _, dbID := range dbIDs {
+		database, err := GetDatabase(dbID)
+		if err != nil {
+			continue
+		}
+
+		// Get connection details
+		connInfo := DatabaseConnectionInfo{
+			ID: dbID,
+		}
+
+		// Check connection status and measure latency
+		start := time.Now()
+		err = database.Ping(ctx)
+		latency := time.Since(start)
+
+		if err != nil {
+			connInfo.Status = "disconnected"
+			connInfo.Latency = "n/a"
+		} else {
+			connInfo.Status = "connected"
+			connInfo.Latency = latency.String()
+		}
+
+		connections = append(connections, connInfo)
+	}
+
+	return connections, nil
 }
 
 // RegisterDatabaseTools registers all database tools with the provided registry
-func RegisterDatabaseTools(registry *tools.Registry) {
+func RegisterDatabaseTools(registry *tools.Registry) error {
+	// Register schema explorer tool
+	registry.RegisterTool(&tools.Tool{
+		Name:        "dbSchema",
+		Description: "Auto-discover database structure and relationships",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
+				"database": map[string]interface{}{
+					"type":        "string",
+					"description": "Database name to explore (optional, leave empty for all databases)",
+				},
+				"table": map[string]interface{}{
+					"type":        "string",
+					"description": "Table name to explore (optional, leave empty for all tables)",
+				},
+			},
+		},
+		Handler: handleSchemaExplorer,
+	})
+
 	// Register query tool
-	registry.RegisterTool(createQueryTool())
+	registry.RegisterTool(&tools.Tool{
+		Name:        "dbQuery",
+		Description: "Execute a database query that returns results",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
+				"query": map[string]interface{}{
+					"type":        "string",
+					"description": "SQL query to execute",
+				},
+				"database": map[string]interface{}{
+					"type":        "string",
+					"description": "Database ID to query (optional if only one database is configured)",
+				},
+				"params": map[string]interface{}{
+					"type":        "array",
+					"description": "Parameters for the query (for prepared statements)",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
+				},
+				"timeout": map[string]interface{}{
+					"type":        "integer",
+					"description": "Query timeout in milliseconds (default: 5000)",
+				},
+			},
+			Required: []string{"query"},
+		},
+		Handler: handleQuery,
+	})
 
 	// Register execute tool
-	registry.RegisterTool(createExecuteTool())
+	registry.RegisterTool(&tools.Tool{
+		Name:        "dbExecute",
+		Description: "Execute a database statement that doesn't return results (INSERT, UPDATE, DELETE, etc.)",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
+				"statement": map[string]interface{}{
+					"type":        "string",
+					"description": "SQL statement to execute",
+				},
+				"database": map[string]interface{}{
+					"type":        "string",
+					"description": "Database ID to use (optional if only one database is configured)",
+				},
+				"params": map[string]interface{}{
+					"type":        "array",
+					"description": "Parameters for the statement (for prepared statements)",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
+				},
+			},
+			Required: []string{"statement"},
+		},
+		Handler: handleExecute,
+	})
 
 	// Register transaction tool
-	registry.RegisterTool(createTransactionTool())
-
-	// Register schema explorer tool
-	registry.RegisterTool(createSchemaExplorerTool())
-
-	// Register query builder tool
-	registry.RegisterTool(createQueryBuilderTool())
+	registry.RegisterTool(&tools.Tool{
+		Name:        "dbTransaction",
+		Description: "Manage database transactions (begin, commit, rollback, execute within transaction)",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
+				"action": map[string]interface{}{
+					"type":        "string",
+					"description": "Transaction action: begin, commit, rollback, or execute",
+					"enum":        []string{"begin", "commit", "rollback", "execute"},
+				},
+				"database": map[string]interface{}{
+					"type":        "string",
+					"description": "Database ID to use (optional if only one database is configured)",
+				},
+				"transactionId": map[string]interface{}{
+					"type":        "string",
+					"description": "Transaction ID (required for commit, rollback, and execute actions)",
+				},
+				"statement": map[string]interface{}{
+					"type":        "string",
+					"description": "SQL statement to execute (required for execute action)",
+				},
+				"params": map[string]interface{}{
+					"type":        "array",
+					"description": "Parameters for the statement (for prepared statements, used with execute action)",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
+				},
+			},
+			Required: []string{"action"},
+		},
+		Handler: handleTransaction,
+	})
 
 	// Register performance analyzer tool
-	registry.RegisterTool(createPerformanceAnalyzerTool())
+	registry.RegisterTool(&tools.Tool{
+		Name:        "dbPerformanceAnalyzer",
+		Description: "Identify slow queries and optimization opportunities",
+		InputSchema: tools.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]interface{}{
+				"query": map[string]interface{}{
+					"type":        "string",
+					"description": "SQL query to analyze",
+				},
+				"database": map[string]interface{}{
+					"type":        "string",
+					"description": "Database ID to use (optional if only one database is configured)",
+				},
+			},
+			Required: []string{"query"},
+		},
+		Handler: handlePerformanceAnalyzer,
+	})
+
+	// Register showConnectedDatabases tool
+	registry.RegisterTool(&tools.Tool{
+		Name:        "showConnectedDatabases",
+		Description: "Shows information about all connected databases",
+		InputSchema: tools.ToolInputSchema{
+			Type:       "object",
+			Properties: map[string]interface{}{},
+		},
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			return showConnectedDatabases(ctx, params)
+		},
+	})
+
+	return nil
 }
 
-// RegisterSchemaExplorerTool registers only the schema explorer tool
-// This is useful when database connection fails but we still want to provide schema exploration
-func RegisterSchemaExplorerTool(registry *tools.Registry) {
-	registry.RegisterTool(createSchemaExplorerTool())
-}
-
-// RegisterMockDatabaseTools registers all database tools with mock implementations
-// This is used when database connection fails but we still want to provide all database tools
-func RegisterMockDatabaseTools(registry *tools.Registry) {
-	// Register mock query tool
-	registry.RegisterTool(createMockQueryTool())
-
-	// Register mock execute tool
-	registry.RegisterTool(createMockExecuteTool())
-
-	// Register mock transaction tool
-	registry.RegisterTool(createMockTransactionTool())
-
-	// Register schema explorer tool (already uses mock data)
-	registry.RegisterTool(createSchemaExplorerTool())
-
-	// Register query builder tool (has mock implementation)
-	registry.RegisterTool(createQueryBuilderTool())
-
-	// Register performance analyzer tool (works without real DB connection)
-	registry.RegisterTool(createPerformanceAnalyzerTool())
+// PingDatabase tests the connection to a database
+func PingDatabase(db *sql.DB) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return db.PingContext(ctx)
 }
 
 // Helper function to convert rows to a slice of maps

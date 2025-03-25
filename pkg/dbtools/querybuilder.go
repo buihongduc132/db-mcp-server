@@ -3,14 +3,50 @@ package dbtools
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/internal/logger"
+	"github.com/FreePeak/db-mcp-server/pkg/db"
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
-// createQueryBuilderTool creates a tool for visually building SQL queries with syntax validation
+// QueryComponents represents the components of a SQL query
+type QueryComponents struct {
+	Select  []string     `json:"select"`
+	From    string       `json:"from"`
+	Joins   []JoinClause `json:"joins"`
+	Where   []Condition  `json:"where"`
+	GroupBy []string     `json:"groupBy"`
+	Having  []string     `json:"having"`
+	OrderBy []OrderBy    `json:"orderBy"`
+	Limit   int          `json:"limit"`
+	Offset  int          `json:"offset"`
+}
+
+// JoinClause represents a SQL JOIN clause
+type JoinClause struct {
+	Type  string `json:"type"`
+	Table string `json:"table"`
+	On    string `json:"on"`
+}
+
+// Condition represents a WHERE condition
+type Condition struct {
+	Column    string `json:"column"`
+	Operator  string `json:"operator"`
+	Value     string `json:"value"`
+	Connector string `json:"connector"`
+}
+
+// OrderBy represents an ORDER BY clause
+type OrderBy struct {
+	Column    string `json:"column"`
+	Direction string `json:"direction"`
+}
+
+// createQueryBuilderTool creates a tool for building and validating SQL queries
 func createQueryBuilderTool() *tools.Tool {
 	return &tools.Tool{
 		Name:        "dbQueryBuilder",
@@ -129,8 +165,12 @@ func createQueryBuilderTool() *tools.Tool {
 					"type":        "integer",
 					"description": "Execution timeout in milliseconds (default: 5000)",
 				},
+				"database": map[string]interface{}{
+					"type":        "string",
+					"description": "Database ID to use (optional if only one database is configured)",
+				},
 			},
-			Required: []string{"action"},
+			Required: []string{"action", "database"},
 		},
 		Handler: handleQueryBuilder,
 	}
@@ -138,336 +178,335 @@ func createQueryBuilderTool() *tools.Tool {
 
 // handleQueryBuilder handles the query builder tool execution
 func handleQueryBuilder(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	// Check if database manager is initialized
+	if dbManager == nil {
+		return nil, fmt.Errorf("database manager not initialized")
+	}
+
 	// Extract parameters
 	action, ok := getStringParam(params, "action")
 	if !ok {
 		return nil, fmt.Errorf("action parameter is required")
 	}
 
-	// Extract timeout
-	timeout := 5000 // Default timeout: 5 seconds
-	if timeoutParam, ok := getIntParam(params, "timeout"); ok {
-		timeout = timeoutParam
+	// Get database ID
+	databaseID, ok := getStringParam(params, "database")
+	if !ok {
+		return nil, fmt.Errorf("database parameter is required")
+	}
+
+	// Get database instance
+	db, err := dbManager.GetDB(databaseID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database: %w", err)
+	}
+
+	// Extract query parameter
+	query, _ := getStringParam(params, "query")
+
+	// Extract components parameter
+	var components QueryComponents
+	if componentsMap, ok := params["components"].(map[string]interface{}); ok {
+		// Parse components from map
+		if err := parseQueryComponents(&components, componentsMap); err != nil {
+			return nil, fmt.Errorf("failed to parse query components: %w", err)
+		}
 	}
 
 	// Create context with timeout
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Perform action
+	// Execute requested action
 	switch action {
 	case "validate":
-		return validateQuery(timeoutCtx, params)
+		if query == "" {
+			return nil, fmt.Errorf("query parameter is required for validate action")
+		}
+		return validateQuery(timeoutCtx, db, query)
 	case "build":
-		return buildQuery(timeoutCtx, params)
+		if err := validateQueryComponents(&components); err != nil {
+			return nil, fmt.Errorf("invalid query components: %w", err)
+		}
+		builtQuery, err := buildQueryFromComponents(&components)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build query: %w", err)
+		}
+		return validateQuery(timeoutCtx, db, builtQuery)
 	case "analyze":
-		return analyzeQuery(timeoutCtx, params)
+		if query == "" {
+			return nil, fmt.Errorf("query parameter is required for analyze action")
+		}
+		return analyzeQueryPlan(timeoutCtx, db, query)
 	default:
 		return nil, fmt.Errorf("invalid action: %s", action)
 	}
 }
 
+// parseQueryComponents parses query components from a map
+func parseQueryComponents(components *QueryComponents, data map[string]interface{}) error {
+	// Parse SELECT columns
+	if selectArr, ok := data["select"].([]interface{}); ok {
+		components.Select = make([]string, len(selectArr))
+		for i, col := range selectArr {
+			if str, ok := col.(string); ok {
+				components.Select[i] = str
+			}
+		}
+	}
+
+	// Parse FROM table
+	if from, ok := data["from"].(string); ok {
+		components.From = from
+	}
+
+	// Parse JOINs
+	if joinsArr, ok := data["joins"].([]interface{}); ok {
+		components.Joins = make([]JoinClause, len(joinsArr))
+		for i, join := range joinsArr {
+			if joinMap, ok := join.(map[string]interface{}); ok {
+				if joinType, ok := joinMap["type"].(string); ok {
+					components.Joins[i].Type = joinType
+				}
+				if table, ok := joinMap["table"].(string); ok {
+					components.Joins[i].Table = table
+				}
+				if on, ok := joinMap["on"].(string); ok {
+					components.Joins[i].On = on
+				}
+			}
+		}
+	}
+
+	// Parse WHERE conditions
+	if whereArr, ok := data["where"].([]interface{}); ok {
+		components.Where = make([]Condition, len(whereArr))
+		for i, cond := range whereArr {
+			if condMap, ok := cond.(map[string]interface{}); ok {
+				if col, ok := condMap["column"].(string); ok {
+					components.Where[i].Column = col
+				}
+				if op, ok := condMap["operator"].(string); ok {
+					components.Where[i].Operator = op
+				}
+				if val, ok := condMap["value"].(string); ok {
+					components.Where[i].Value = val
+				}
+				if conn, ok := condMap["connector"].(string); ok {
+					components.Where[i].Connector = conn
+				}
+			}
+		}
+	}
+
+	// Parse GROUP BY columns
+	if groupByArr, ok := data["groupBy"].([]interface{}); ok {
+		components.GroupBy = make([]string, len(groupByArr))
+		for i, col := range groupByArr {
+			if str, ok := col.(string); ok {
+				components.GroupBy[i] = str
+			}
+		}
+	}
+
+	// Parse HAVING conditions
+	if havingArr, ok := data["having"].([]interface{}); ok {
+		components.Having = make([]string, len(havingArr))
+		for i, cond := range havingArr {
+			if str, ok := cond.(string); ok {
+				components.Having[i] = str
+			}
+		}
+	}
+
+	// Parse ORDER BY clauses
+	if orderByArr, ok := data["orderBy"].([]interface{}); ok {
+		components.OrderBy = make([]OrderBy, len(orderByArr))
+		for i, order := range orderByArr {
+			if orderMap, ok := order.(map[string]interface{}); ok {
+				if col, ok := orderMap["column"].(string); ok {
+					components.OrderBy[i].Column = col
+				}
+				if dir, ok := orderMap["direction"].(string); ok {
+					components.OrderBy[i].Direction = dir
+				}
+			}
+		}
+	}
+
+	// Parse LIMIT
+	if limit, ok := data["limit"].(float64); ok {
+		components.Limit = int(limit)
+	}
+
+	// Parse OFFSET
+	if offset, ok := data["offset"].(float64); ok {
+		components.Offset = int(offset)
+	}
+
+	return nil
+}
+
+// validateQueryComponents validates query components
+func validateQueryComponents(components *QueryComponents) error {
+	if components.From == "" {
+		return fmt.Errorf("FROM clause is required")
+	}
+
+	if len(components.Select) == 0 {
+		return fmt.Errorf("SELECT clause must have at least one column")
+	}
+
+	for _, join := range components.Joins {
+		if join.Table == "" {
+			return fmt.Errorf("JOIN clause must have a table")
+		}
+		if join.On == "" {
+			return fmt.Errorf("JOIN clause must have an ON condition")
+		}
+	}
+
+	for _, where := range components.Where {
+		if where.Column == "" {
+			return fmt.Errorf("WHERE condition must have a column")
+		}
+		if where.Operator == "" {
+			return fmt.Errorf("WHERE condition must have an operator")
+		}
+	}
+
+	for _, order := range components.OrderBy {
+		if order.Column == "" {
+			return fmt.Errorf("ORDER BY clause must have a column")
+		}
+		if order.Direction != "ASC" && order.Direction != "DESC" {
+			return fmt.Errorf("ORDER BY direction must be ASC or DESC")
+		}
+	}
+
+	return nil
+}
+
+// buildQueryFromComponents builds a SQL query from components
+func buildQueryFromComponents(components *QueryComponents) (string, error) {
+	var query strings.Builder
+
+	// Build SELECT clause
+	query.WriteString("SELECT ")
+	query.WriteString(strings.Join(components.Select, ", "))
+
+	// Build FROM clause
+	query.WriteString(" FROM ")
+	query.WriteString(components.From)
+
+	// Build JOIN clauses
+	for _, join := range components.Joins {
+		query.WriteString(" ")
+		query.WriteString(strings.ToUpper(join.Type))
+		query.WriteString(" JOIN ")
+		query.WriteString(join.Table)
+		query.WriteString(" ON ")
+		query.WriteString(join.On)
+	}
+
+	// Build WHERE clause
+	if len(components.Where) > 0 {
+		query.WriteString(" WHERE ")
+		for i, cond := range components.Where {
+			if i > 0 {
+				query.WriteString(" ")
+				query.WriteString(cond.Connector)
+				query.WriteString(" ")
+			}
+			query.WriteString(cond.Column)
+			query.WriteString(" ")
+			query.WriteString(cond.Operator)
+			if cond.Value != "" {
+				query.WriteString(" ")
+				query.WriteString(cond.Value)
+			}
+		}
+	}
+
+	// Build GROUP BY clause
+	if len(components.GroupBy) > 0 {
+		query.WriteString(" GROUP BY ")
+		query.WriteString(strings.Join(components.GroupBy, ", "))
+	}
+
+	// Build HAVING clause
+	if len(components.Having) > 0 {
+		query.WriteString(" HAVING ")
+		query.WriteString(strings.Join(components.Having, " AND "))
+	}
+
+	// Build ORDER BY clause
+	if len(components.OrderBy) > 0 {
+		query.WriteString(" ORDER BY ")
+		var orders []string
+		for _, order := range components.OrderBy {
+			orders = append(orders, order.Column+" "+order.Direction)
+		}
+		query.WriteString(strings.Join(orders, ", "))
+	}
+
+	// Build LIMIT clause
+	if components.Limit > 0 {
+		query.WriteString(fmt.Sprintf(" LIMIT %d", components.Limit))
+	}
+
+	// Build OFFSET clause
+	if components.Offset > 0 {
+		query.WriteString(fmt.Sprintf(" OFFSET %d", components.Offset))
+	}
+
+	return query.String(), nil
+}
+
 // validateQuery validates a SQL query for syntax errors
-func validateQuery(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Extract query parameter
-	query, ok := getStringParam(params, "query")
-	if !ok {
-		return nil, fmt.Errorf("query parameter is required for validate action")
-	}
-
-	// Check if database is initialized
-	if dbInstance == nil {
-		// Return mock validation results if no database connection
-		return mockValidateQuery(query)
-	}
-
-	// Call the database to validate the query
-	// This uses EXPLAIN to check syntax without executing the query
-	validateSQL := fmt.Sprintf("EXPLAIN %s", query)
-	_, err := dbInstance.Query(ctx, validateSQL)
-
+func validateQuery(ctx context.Context, db db.Database, query string) (interface{}, error) {
+	// Validate query by attempting to execute it with EXPLAIN
+	explainQuery := "EXPLAIN " + query
+	_, err := db.Query(ctx, explainQuery)
 	if err != nil {
-		// Return error details with suggestions
 		return map[string]interface{}{
-			"valid":       false,
-			"query":       query,
-			"error":       err.Error(),
-			"suggestion":  getSuggestionForError(err.Error()),
-			"errorLine":   getErrorLineFromMessage(err.Error()),
-			"errorColumn": getErrorColumnFromMessage(err.Error()),
+			"valid": false,
+			"error": err.Error(),
+			"query": query,
 		}, nil
 	}
 
-	// Query is valid
 	return map[string]interface{}{
 		"valid": true,
 		"query": query,
 	}, nil
 }
 
-// buildQuery builds a SQL query from components
-func buildQuery(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Extract components parameter
-	componentsObj, ok := params["components"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("components parameter is required for build action")
-	}
-
-	// Build the query from components
-	var query strings.Builder
-
-	// SELECT clause
-	selectColumns, _ := getArrayParam(componentsObj, "select")
-	if len(selectColumns) == 0 {
-		selectColumns = []interface{}{"*"}
-	}
-
-	query.WriteString("SELECT ")
-	for i, col := range selectColumns {
-		if i > 0 {
-			query.WriteString(", ")
-		}
-		query.WriteString(fmt.Sprintf("%v", col))
-	}
-
-	// FROM clause
-	fromTable, ok := getStringParam(componentsObj, "from")
-	if !ok {
-		return nil, fmt.Errorf("from parameter is required in components")
-	}
-
-	query.WriteString(" FROM ")
-	query.WriteString(fromTable)
-
-	// JOINS
-	if joins, ok := componentsObj["joins"].([]interface{}); ok {
-		for _, joinObj := range joins {
-			if join, ok := joinObj.(map[string]interface{}); ok {
-				joinType, _ := getStringParam(join, "type")
-				joinTable, _ := getStringParam(join, "table")
-				joinOn, _ := getStringParam(join, "on")
-
-				if joinType != "" && joinTable != "" && joinOn != "" {
-					query.WriteString(fmt.Sprintf(" %s JOIN %s ON %s",
-						strings.ToUpper(joinType), joinTable, joinOn))
-				}
-			}
-		}
-	}
-
-	// WHERE clause
-	if whereConditions, ok := componentsObj["where"].([]interface{}); ok && len(whereConditions) > 0 {
-		query.WriteString(" WHERE ")
-
-		for i, condObj := range whereConditions {
-			if cond, ok := condObj.(map[string]interface{}); ok {
-				column, _ := getStringParam(cond, "column")
-				operator, _ := getStringParam(cond, "operator")
-				value, _ := getStringParam(cond, "value")
-				connector, _ := getStringParam(cond, "connector")
-
-				// Don't add connector for first condition
-				if i > 0 && connector != "" {
-					query.WriteString(fmt.Sprintf(" %s ", connector))
-				}
-
-				// Handle special operators like IS NULL
-				if operator == "IS NULL" || operator == "IS NOT NULL" {
-					query.WriteString(fmt.Sprintf("%s %s", column, operator))
-				} else {
-					query.WriteString(fmt.Sprintf("%s %s '%s'", column, operator, value))
-				}
-			}
-		}
-	}
-
-	// GROUP BY
-	if groupByColumns, ok := getArrayParam(componentsObj, "groupBy"); ok && len(groupByColumns) > 0 {
-		query.WriteString(" GROUP BY ")
-
-		for i, col := range groupByColumns {
-			if i > 0 {
-				query.WriteString(", ")
-			}
-			query.WriteString(fmt.Sprintf("%v", col))
-		}
-	}
-
-	// HAVING
-	if havingConditions, ok := getArrayParam(componentsObj, "having"); ok && len(havingConditions) > 0 {
-		query.WriteString(" HAVING ")
-
-		for i, cond := range havingConditions {
-			if i > 0 {
-				query.WriteString(" AND ")
-			}
-			query.WriteString(fmt.Sprintf("%v", cond))
-		}
-	}
-
-	// ORDER BY
-	if orderByParams, ok := componentsObj["orderBy"].([]interface{}); ok && len(orderByParams) > 0 {
-		query.WriteString(" ORDER BY ")
-
-		for i, orderObj := range orderByParams {
-			if order, ok := orderObj.(map[string]interface{}); ok {
-				column, _ := getStringParam(order, "column")
-				direction, _ := getStringParam(order, "direction")
-
-				if i > 0 {
-					query.WriteString(", ")
-				}
-
-				if direction != "" {
-					query.WriteString(fmt.Sprintf("%s %s", column, direction))
-				} else {
-					query.WriteString(column)
-				}
-			}
-		}
-	}
-
-	// LIMIT and OFFSET
-	if limit, ok := getIntParam(componentsObj, "limit"); ok {
-		query.WriteString(fmt.Sprintf(" LIMIT %d", limit))
-
-		if offset, ok := getIntParam(componentsObj, "offset"); ok {
-			query.WriteString(fmt.Sprintf(" OFFSET %d", offset))
-		}
-	}
-
-	// Validate the built query if a database connection is available
-	builtQuery := query.String()
-	var validation map[string]interface{}
-
-	if dbInstance != nil {
-		validationParams := map[string]interface{}{
-			"query": builtQuery,
-		}
-		validationResult, err := validateQuery(ctx, validationParams)
-		if err != nil {
-			validation = map[string]interface{}{
-				"valid": false,
-				"error": err.Error(),
-			}
-		} else {
-			validation = validationResult.(map[string]interface{})
-		}
-	} else {
-		// Use mock validation if no database is available
-		mockResult, _ := mockValidateQuery(builtQuery)
-		validation = mockResult.(map[string]interface{})
-	}
-
-	// Return the built query and validation results
-	return map[string]interface{}{
-		"query":      builtQuery,
-		"components": componentsObj,
-		"validation": validation,
-	}, nil
-}
-
-// analyzeQuery analyzes a SQL query for potential issues and performance considerations
-func analyzeQuery(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Extract query parameter
-	query, ok := getStringParam(params, "query")
-	if !ok {
-		return nil, fmt.Errorf("query parameter is required for analyze action")
-	}
-
-	// Check if database is initialized
-	if dbInstance == nil {
-		// Return mock analysis results if no database connection
-		return mockAnalyzeQuery(query)
-	}
-
-	// Analyze the query using EXPLAIN
-	results := make(map[string]interface{})
-
-	// Execute EXPLAIN
-	explainSQL := fmt.Sprintf("EXPLAIN %s", query)
-	rows, err := dbInstance.Query(ctx, explainSQL)
+// analyzeQueryPlan analyzes a specific query for performance
+func analyzeQueryPlan(ctx context.Context, db db.Database, query string) (interface{}, error) {
+	explainQuery := "EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS) " + query
+	rows, err := db.Query(ctx, explainQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze query: %w", err)
 	}
 	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			logger.Error("Error closing rows: %v", closeErr)
+		if err := rows.Close(); err != nil {
+			log.Printf("error closing rows: %v", err)
 		}
 	}()
 
-	// Process the explain plan
-	explainResults, err := rowsToMaps(rows)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process explain results: %w", err)
+	var plan []byte
+	if !rows.Next() {
+		return nil, fmt.Errorf("no explain plan returned")
+	}
+	if err := rows.Scan(&plan); err != nil {
+		return nil, fmt.Errorf("failed to scan explain plan: %w", err)
 	}
 
-	// Add explain plan to results
-	results["explainPlan"] = explainResults
-
-	// Check for common performance issues
-	var issues []string
-	var suggestions []string
-
-	// Look for full table scans
-	hasFullTableScan := false
-	for _, row := range explainResults {
-		// Check different fields that might indicate a table scan
-		// MySQL uses "type" field, PostgreSQL uses "scan_type"
-		scanType, ok := row["type"].(string)
-		if !ok {
-			scanType, _ = row["scan_type"].(string)
-		}
-
-		// "ALL" in MySQL or "Seq Scan" in PostgreSQL indicates a full table scan
-		if scanType == "ALL" || strings.Contains(fmt.Sprintf("%v", row), "Seq Scan") {
-			hasFullTableScan = true
-			tableName := ""
-			if t, ok := row["table"].(string); ok {
-				tableName = t
-			} else if t, ok := row["relation_name"].(string); ok {
-				tableName = t
-			}
-
-			issues = append(issues, fmt.Sprintf("Full table scan detected on table '%s'", tableName))
-			suggestions = append(suggestions, fmt.Sprintf("Consider adding an index to the columns used in WHERE clause for table '%s'", tableName))
-		}
-	}
-
-	// Check for missing indexes in the query
-	if !hasFullTableScan {
-		// Check if "key" or "index_name" is NULL or empty
-		for _, row := range explainResults {
-			keyField := row["key"]
-			if keyField == nil || keyField == "" {
-				issues = append(issues, "Operation with no index used detected")
-				suggestions = append(suggestions, "Review the query to ensure indexed columns are used in WHERE clauses")
-				break
-			}
-		}
-	}
-
-	// Check for sorting operations
-	for _, row := range explainResults {
-		extraInfo := fmt.Sprintf("%v", row["Extra"])
-		if strings.Contains(extraInfo, "Using filesort") {
-			issues = append(issues, "Query requires sorting (filesort)")
-			suggestions = append(suggestions, "Consider adding an index on the columns used in ORDER BY")
-		}
-
-		if strings.Contains(extraInfo, "Using temporary") {
-			issues = append(issues, "Query requires a temporary table")
-			suggestions = append(suggestions, "Complex query detected. Consider simplifying or optimizing with indexes")
-		}
-	}
-
-	// Add analysis to results
-	results["query"] = query
-	results["issues"] = issues
-	results["suggestions"] = suggestions
-	results["complexity"] = calculateQueryComplexity(query)
-
-	return results, nil
+	return map[string]interface{}{
+		"query": query,
+		"plan":  string(plan),
+	}, nil
 }
 
 // Helper function to calculate query complexity
@@ -531,6 +570,8 @@ func getSuggestionForError(errorMsg string) string {
 	return "Review the query syntax and structure"
 }
 
+// getErrorLineFromMessage extracts the line number from an error message
+// nolint:unused
 func getErrorLineFromMessage(errorMsg string) int {
 	// MySQL format: "ERROR at line 1"
 	// PostgreSQL format: "LINE 2:"
@@ -548,6 +589,8 @@ func getErrorLineFromMessage(errorMsg string) int {
 	return 0
 }
 
+// getErrorColumnFromMessage extracts the column/position number from an error message
+// nolint:unused
 func getErrorColumnFromMessage(errorMsg string) int {
 	// PostgreSQL format: "LINE 1: SELECT * FROM ^ [position: 14]"
 	if strings.Contains(errorMsg, "position:") {

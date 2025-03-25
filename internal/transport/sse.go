@@ -63,10 +63,36 @@ func (t *SSETransport) GetMethodHandler(method string) (mcp.MethodHandler, bool)
 
 // HandleSSE handles SSE connection requests
 func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
+	// Set CORS headers
+	w.Header().Set(headerAccessControlAllowOrigin, "*")
+	w.Header().Set(headerAccessControlAllowHeaders, "Content-Type, Authorization")
+	w.Header().Set(headerAccessControlAllowMethods, "GET, OPTIONS")
+
+	// Handle preflight request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// Check if the request method is GET
 	if r.Method != http.MethodGet {
 		logger.Error("Method not allowed: %s, expected GET", r.Method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Set SSE headers
+	w.Header().Set(headerContentType, contentTypeEventStream)
+	w.Header().Set(headerCacheControl, "no-cache")
+	w.Header().Set(headerConnection, "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // Disable buffering for nginx
+
+	// Enable streaming
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	} else {
+		logger.Error("Streaming not supported")
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
 		return
 	}
 
@@ -103,15 +129,6 @@ func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		sess = t.sessionManager.CreateSession()
 		logger.Info("Created new session %s", sess.ID)
 	}
-
-	// Set SSE headers
-	w.Header().Set(headerContentType, contentTypeEventStream)
-	w.Header().Set(headerCacheControl, "no-cache")
-	w.Header().Set(headerConnection, "keep-alive")
-	w.Header().Set(headerAccessControlAllowOrigin, "*")
-	w.Header().Set(headerAccessControlAllowHeaders, "Content-Type")
-	w.Header().Set(headerAccessControlAllowMethods, "GET, OPTIONS")
-	w.WriteHeader(http.StatusOK)
 
 	// Set event callback
 	sess.EventCallback = func(event string, data []byte) error {
@@ -171,15 +188,15 @@ func (t *SSETransport) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Client disconnected: %s", sess.ID)
 }
 
-// HandleMessage handles a JSON-RPC message
+// HandleMessage handles incoming messages from clients
 func (t *SSETransport) HandleMessage(w http.ResponseWriter, r *http.Request) {
 	// Set CORS headers
 	w.Header().Set(headerAccessControlAllowOrigin, "*")
-	w.Header().Set(headerAccessControlAllowHeaders, "Content-Type")
+	w.Header().Set(headerAccessControlAllowHeaders, "Content-Type, Authorization")
 	w.Header().Set(headerAccessControlAllowMethods, "POST, OPTIONS")
 	w.Header().Set(headerContentType, "application/json")
 
-	// Handle preflight requests
+	// Handle preflight request
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
 		return

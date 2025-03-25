@@ -6,7 +6,7 @@ build:
 
 # Run the server in stdio mode
 run-stdio: build
-	./mcp-server --transport stdio
+	./mcp-server -t stdio
 
 # Run the server in SSE mode
 run-sse: clean build
@@ -33,6 +33,7 @@ test:
 # Clean build artifacts
 clean:
 	rm -f mcp-server mcp-client mcp-simple-client
+	# lsof -i :9090 | grep LISTEN | awk '{print $2}' | xargs kill -9
 
 # Default target
 all: build 

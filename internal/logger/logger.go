@@ -36,6 +36,12 @@ func Initialize(level string) {
 	setLogLevel(level)
 }
 
+// InitializeWithWriter sets up the logger with the specified level and output writer
+func InitializeWithWriter(level string, writer *os.File) {
+	logger = log.New(writer, "", 0)
+	setLogLevel(level)
+}
+
 // setLogLevel sets the log level from a string
 func setLogLevel(level string) {
 	switch strings.ToLower(level) {

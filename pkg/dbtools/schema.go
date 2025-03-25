@@ -26,14 +26,18 @@ func createSchemaExplorerTool() *tools.Tool {
 				},
 				"table": map[string]interface{}{
 					"type":        "string",
-					"description": "Table name (required when component is 'columns' and optional for 'relationships')",
+					"description": "Table name to explore (optional, leave empty for all tables)",
 				},
 				"timeout": map[string]interface{}{
 					"type":        "integer",
 					"description": "Query timeout in milliseconds (default: 10000)",
 				},
+				"database": map[string]interface{}{
+					"type":        "string",
+					"description": "Database ID to use (optional if only one database is configured)",
+				},
 			},
-			Required: []string{"component"},
+			Required: []string{"component", "database"},
 		},
 		Handler: handleSchemaExplorer,
 	}
@@ -41,10 +45,27 @@ func createSchemaExplorerTool() *tools.Tool {
 
 // handleSchemaExplorer handles the schema explorer tool execution
 func handleSchemaExplorer(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	// Check if database manager is initialized
+	if dbManager == nil {
+		return nil, fmt.Errorf("database manager not initialized")
+	}
+
 	// Extract parameters
 	component, ok := getStringParam(params, "component")
 	if !ok {
 		return nil, fmt.Errorf("component parameter is required")
+	}
+
+	// Get database ID
+	databaseID, ok := getStringParam(params, "database")
+	if !ok {
+		return nil, fmt.Errorf("database parameter is required")
+	}
+
+	// Get database instance
+	db, err := dbManager.GetDB(databaseID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
 
 	// Extract table parameter (optional depending on component)
@@ -60,428 +81,158 @@ func handleSchemaExplorer(ctx context.Context, params map[string]interface{}) (i
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	// Force use of actual database and don't fall back to mock data
-	log.Printf("dbSchema: Using component=%s, table=%s", component, table)
-	log.Printf("dbSchema: DB instance nil? %v", dbInstance == nil)
-
-	// Print database configuration
-	if dbConfig != nil {
-		log.Printf("dbSchema: DB Config - Type: %s, Host: %s, Port: %d, User: %s, Name: %s",
-			dbConfig.Type, dbConfig.Host, dbConfig.Port, dbConfig.User, dbConfig.Name)
-	} else {
-		log.Printf("dbSchema: DB Config is nil")
-	}
-
-	if dbInstance == nil {
-		log.Printf("dbSchema: Database connection not initialized, attempting to create one")
-		// Try to initialize database if not already done
-		if dbConfig == nil {
-			return nil, fmt.Errorf("database not initialized: both dbInstance and dbConfig are nil")
-		}
-
-		// Connect to the database
-		database, err := db.NewDatabase(*dbConfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create database instance: %w", err)
-		}
-
-		if err := database.Connect(); err != nil {
-			return nil, fmt.Errorf("failed to connect to database: %w", err)
-		}
-
-		dbInstance = database
-		log.Printf("dbSchema: Connected to %s database at %s:%d/%s",
-			dbConfig.Type, dbConfig.Host, dbConfig.Port, dbConfig.Name)
-	}
-
 	// Use actual database queries based on component type
 	switch component {
 	case "tables":
-		return getTables(timeoutCtx)
+		return getTables(timeoutCtx, db)
 	case "columns":
 		if table == "" {
 			return nil, fmt.Errorf("table parameter is required for columns component")
 		}
-		return getColumns(timeoutCtx, table)
+		return getColumns(timeoutCtx, db, table)
 	case "relationships":
-		return getRelationships(timeoutCtx, table)
+		return getRelationships(timeoutCtx, db, table)
 	case "full":
-		return getFullSchema(timeoutCtx)
+		return getFullSchema(timeoutCtx, db)
 	default:
 		return nil, fmt.Errorf("invalid component: %s", component)
 	}
 }
 
-// getTables returns the list of tables from the actual database
-func getTables(ctx context.Context) (interface{}, error) {
-	var query string
-	var args []interface{}
-
-	log.Printf("dbSchema getTables: Database type: %s", dbConfig.Type)
-
-	// Query depends on database type
-	switch dbConfig.Type {
-	case string(MySQL):
-		query = `
-			SELECT 
-				TABLE_NAME as name,
-				TABLE_TYPE as type,
-				ENGINE as engine,
-				TABLE_ROWS as estimated_row_count,
-				CREATE_TIME as create_time,
-				UPDATE_TIME as update_time
-			FROM 
-				information_schema.TABLES 
-			WHERE 
-				TABLE_SCHEMA = ?
-			ORDER BY 
-				TABLE_NAME
-		`
-		args = []interface{}{dbConfig.Name}
-		log.Printf("dbSchema getTables: Using MySQL query with schema: %s", dbConfig.Name)
-
-	case string(Postgres):
-		query = `
-			SELECT 
-				table_name as name,
-				table_type as type,
-				'PostgreSQL' as engine,
-				0 as estimated_row_count,
-				NULL as create_time,
-				NULL as update_time
-			FROM 
-				information_schema.tables 
-			WHERE 
-				table_schema = 'public'
-			ORDER BY 
-				table_name
-		`
-		log.Printf("dbSchema getTables: Using PostgreSQL query")
-
-	default:
-		// Fallback to a simple SHOW TABLES query
-		log.Printf("dbSchema getTables: Using fallback SHOW TABLES query for unknown DB type: %s", dbConfig.Type)
-		query = "SHOW TABLES"
-
-		// Get the results
-		rows, err := dbInstance.Query(ctx, query)
-		if err != nil {
-			log.Printf("dbSchema getTables: SHOW TABLES query failed: %v", err)
-			return nil, fmt.Errorf("failed to query tables: %w", err)
-		}
-		defer func() {
-			if closeErr := rows.Close(); closeErr != nil {
-				log.Printf("dbSchema getTables: Error closing rows: %v", closeErr)
-			}
-		}()
-
-		// Convert to a list of tables
-		var tables []map[string]interface{}
-		var tableName string
-
-		for rows.Next() {
-			if err := rows.Scan(&tableName); err != nil {
-				log.Printf("dbSchema getTables: Failed to scan row: %v", err)
-				continue
-			}
-
-			tables = append(tables, map[string]interface{}{
-				"name": tableName,
-				"type": "BASE TABLE", // Default type
-			})
-		}
-
-		if err := rows.Err(); err != nil {
-			log.Printf("dbSchema getTables: Error during rows iteration: %v", err)
-			return nil, fmt.Errorf("error iterating through tables: %w", err)
-		}
-
-		log.Printf("dbSchema getTables: Found %d tables using SHOW TABLES", len(tables))
-		return map[string]interface{}{
-			"tables": tables,
-			"count":  len(tables),
-			"type":   dbConfig.Type,
-		}, nil
-	}
-
-	// Execute query
-	log.Printf("dbSchema getTables: Executing query: %s with args: %v", query, args)
-	rows, err := dbInstance.Query(ctx, query, args...)
+// getTables retrieves the list of tables in the database
+func getTables(ctx context.Context, db db.Database) (interface{}, error) {
+	query := "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+	rows, err := db.Query(ctx, query)
 	if err != nil {
-		log.Printf("dbSchema getTables: Query failed: %v", err)
-		return nil, fmt.Errorf("failed to query tables: %w", err)
+		return nil, fmt.Errorf("failed to get tables: %w", err)
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("dbSchema getTables: Error closing rows: %v", closeErr)
+			log.Printf("error closing rows: %v", closeErr)
 		}
 	}()
 
-	// Convert rows to map
-	tables, err := rowsToMaps(rows)
+	// Convert rows to maps
+	results, err := rowsToMaps(rows)
 	if err != nil {
-		log.Printf("dbSchema getTables: Failed to process rows: %v", err)
-		return nil, fmt.Errorf("failed to process query results: %w", err)
+		return nil, fmt.Errorf("failed to process tables: %w", err)
 	}
 
-	log.Printf("dbSchema getTables: Found %d tables", len(tables))
 	return map[string]interface{}{
-		"tables": tables,
-		"count":  len(tables),
-		"type":   dbConfig.Type,
+		"tables": results,
 	}, nil
 }
 
-// getColumns returns the columns for a specific table from the actual database
-func getColumns(ctx context.Context, table string) (interface{}, error) {
-	var query string
-
-	// Query depends on database type
-	switch dbConfig.Type {
-	case string(MySQL):
-		query = `
-			SELECT 
-				COLUMN_NAME as name,
-				COLUMN_TYPE as type,
-				IS_NULLABLE as nullable,
-				COLUMN_KEY as ` + "`key`" + `,
-				EXTRA as extra,
-				COLUMN_DEFAULT as default_value,
-				CHARACTER_MAXIMUM_LENGTH as max_length,
-				NUMERIC_PRECISION as numeric_precision,
-				NUMERIC_SCALE as numeric_scale,
-				COLUMN_COMMENT as comment
-			FROM 
-				information_schema.COLUMNS
-			WHERE 
-				TABLE_SCHEMA = ? AND TABLE_NAME = ?
-			ORDER BY 
-				ORDINAL_POSITION
-		`
-	case string(Postgres):
-		query = `
-			SELECT 
-				column_name as name,
-				data_type as type,
-				is_nullable as nullable,
-				CASE 
-					WHEN EXISTS (
-						SELECT 1 FROM information_schema.table_constraints tc
-						JOIN information_schema.constraint_column_usage ccu
-						ON tc.constraint_name = ccu.constraint_name
-						WHERE tc.constraint_type = 'PRIMARY KEY'
-						AND tc.table_name = c.table_name
-						AND ccu.column_name = c.column_name
-					) THEN 'PRI'
-					WHEN EXISTS (
-						SELECT 1 FROM information_schema.table_constraints tc
-						JOIN information_schema.constraint_column_usage ccu
-						ON tc.constraint_name = ccu.constraint_name
-						WHERE tc.constraint_type = 'UNIQUE'
-						AND tc.table_name = c.table_name
-						AND ccu.column_name = c.column_name
-					) THEN 'UNI'
-					WHEN EXISTS (
-						SELECT 1 FROM information_schema.table_constraints tc
-						JOIN information_schema.constraint_column_usage ccu
-						ON tc.constraint_name = ccu.constraint_name
-						WHERE tc.constraint_type = 'FOREIGN KEY'
-						AND tc.table_name = c.table_name
-						AND ccu.column_name = c.column_name
-					) THEN 'MUL'
-					ELSE ''
-				END as "key",
-				'' as extra,
-				column_default as default_value,
-				character_maximum_length as max_length,
-				numeric_precision as numeric_precision,
-				numeric_scale as numeric_scale,
-				'' as comment
-			FROM 
-				information_schema.columns c
-			WHERE 
-				table_schema = 'public' AND table_name = ?
-			ORDER BY 
-				ordinal_position
-		`
-	default:
-		return nil, fmt.Errorf("unsupported database type: %s", dbConfig.Type)
-	}
-
-	var args []interface{}
-	if dbConfig.Type == string(MySQL) {
-		args = []interface{}{dbConfig.Name, table}
-	} else {
-		args = []interface{}{table}
-	}
-
-	// Execute query
-	rows, err := dbInstance.Query(ctx, query, args...)
+// getColumns retrieves the columns for a specific table
+func getColumns(ctx context.Context, db db.Database, table string) (interface{}, error) {
+	query := `
+		SELECT column_name, data_type, is_nullable, column_default
+		FROM information_schema.columns
+		WHERE table_name = $1 AND table_schema = 'public'
+		ORDER BY ordinal_position
+	`
+	rows, err := db.Query(ctx, query, table)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query columns for table %s: %w", table, err)
+		return nil, fmt.Errorf("failed to get columns for table %s: %w", table, err)
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("dbSchema getColumns: Error closing rows: %v", closeErr)
+			log.Printf("error closing rows: %v", closeErr)
 		}
 	}()
 
-	// Convert rows to map
-	columns, err := rowsToMaps(rows)
+	// Convert rows to maps
+	results, err := rowsToMaps(rows)
 	if err != nil {
-		return nil, fmt.Errorf("failed to process query results: %w", err)
+		return nil, fmt.Errorf("failed to process columns: %w", err)
 	}
 
 	return map[string]interface{}{
 		"table":   table,
-		"columns": columns,
-		"count":   len(columns),
-		"type":    dbConfig.Type,
+		"columns": results,
 	}, nil
 }
 
-// getRelationships returns the foreign key relationships from the actual database
-func getRelationships(ctx context.Context, table string) (interface{}, error) {
-	var query string
-	var args []interface{}
+// getRelationships retrieves the relationships for a table or all tables
+func getRelationships(ctx context.Context, db db.Database, table string) (interface{}, error) {
+	query := `
+		SELECT
+			tc.table_schema,
+			tc.constraint_name,
+			tc.table_name,
+			kcu.column_name,
+			ccu.table_schema AS foreign_table_schema,
+			ccu.table_name AS foreign_table_name,
+			ccu.column_name AS foreign_column_name
+		FROM information_schema.table_constraints AS tc
+		JOIN information_schema.key_column_usage AS kcu
+			ON tc.constraint_name = kcu.constraint_name
+			AND tc.table_schema = kcu.table_schema
+		JOIN information_schema.constraint_column_usage AS ccu
+			ON ccu.constraint_name = tc.constraint_name
+			AND ccu.table_schema = tc.table_schema
+		WHERE tc.constraint_type = 'FOREIGN KEY'
+			AND tc.table_schema = 'public'
+	`
+	args := []interface{}{}
 
-	// Query depends on database type
-	switch dbConfig.Type {
-	case string(MySQL):
-		query = `
-			SELECT 
-				kcu.CONSTRAINT_NAME as constraint_name,
-				kcu.TABLE_NAME as table_name,
-				kcu.COLUMN_NAME as column_name,
-				kcu.REFERENCED_TABLE_NAME as referenced_table,
-				kcu.REFERENCED_COLUMN_NAME as referenced_column,
-				rc.UPDATE_RULE as update_rule,
-				rc.DELETE_RULE as delete_rule
-			FROM 
-				information_schema.KEY_COLUMN_USAGE kcu
-			JOIN 
-				information_schema.REFERENTIAL_CONSTRAINTS rc
-				ON kcu.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
-				AND kcu.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
-			WHERE 
-				kcu.TABLE_SCHEMA = ?
-				AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
-		`
-
-		args = []interface{}{dbConfig.Name}
-		// If table is specified, add it to WHERE clause
-		if table != "" {
-			query += " AND (kcu.TABLE_NAME = ? OR kcu.REFERENCED_TABLE_NAME = ?)"
-			args = append(args, table, table)
-		}
-
-	case string(Postgres):
-		query = `
-			SELECT
-				tc.constraint_name,
-				tc.table_name,
-				kcu.column_name,
-				ccu.table_name AS referenced_table,
-				ccu.column_name AS referenced_column,
-				'CASCADE' as update_rule, -- Postgres doesn't expose this in info schema
-				'CASCADE' as delete_rule  -- Postgres doesn't expose this in info schema
-			FROM 
-				information_schema.table_constraints AS tc
-			JOIN 
-				information_schema.key_column_usage AS kcu
-				ON tc.constraint_name = kcu.constraint_name
-			JOIN 
-				information_schema.constraint_column_usage AS ccu
-				ON ccu.constraint_name = tc.constraint_name
-			WHERE 
-				tc.constraint_type = 'FOREIGN KEY'
-				AND tc.table_schema = 'public'
-		`
-
-		// If table is specified, add it to WHERE clause
-		if table != "" {
-			query += " AND (tc.table_name = ? OR ccu.table_name = ?)"
-			args = append(args, table, table)
-		}
-
-	default:
-		return nil, fmt.Errorf("unsupported database type: %s", dbConfig.Type)
+	if table != "" {
+		query += " AND tc.table_name = $1"
+		args = append(args, table)
 	}
 
-	// Execute query
-	rows, err := dbInstance.Query(ctx, query, args...)
+	rows, err := db.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query relationships: %w", err)
+		return nil, fmt.Errorf("failed to get relationships for table %s: %w", table, err)
 	}
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("dbSchema getRelationships: Error closing rows: %v", closeErr)
+			log.Printf("error closing rows: %v", closeErr)
 		}
 	}()
 
-	// Convert rows to map
-	relationships, err := rowsToMaps(rows)
+	// Convert rows to maps
+	results, err := rowsToMaps(rows)
 	if err != nil {
-		return nil, fmt.Errorf("failed to process query results: %w", err)
+		return nil, fmt.Errorf("failed to process relationships: %w", err)
 	}
 
 	return map[string]interface{}{
-		"relationships": relationships,
-		"count":         len(relationships),
-		"type":          dbConfig.Type,
-		"table":         table, // If specified
+		"relationships": results,
 	}, nil
 }
 
-// getFullSchema returns complete schema information
-func getFullSchema(ctx context.Context) (interface{}, error) {
-	// Get tables
-	tablesResult, err := getTables(ctx)
+// getFullSchema retrieves the complete database schema
+func getFullSchema(ctx context.Context, db db.Database) (interface{}, error) {
+	// Get tables first
+	tablesResult, err := getTables(ctx, db)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tables: %w", err)
 	}
 
-	// Get relationships
-	relationshipsResult, err := getRelationships(ctx, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get relationships: %w", err)
+	tables := tablesResult.(map[string]interface{})["tables"].([]map[string]interface{})
+
+	// For each table, get columns
+	fullSchema := make(map[string]interface{})
+	for _, tableInfo := range tables {
+		tableName := tableInfo["table_name"].(string)
+		columnsResult, columnsErr := getColumns(ctx, db, tableName)
+		if columnsErr != nil {
+			return nil, fmt.Errorf("failed to get columns for table %s: %w", tableName, columnsErr)
+		}
+		fullSchema[tableName] = columnsResult
 	}
 
-	// Extract tables
-	tables, ok := tablesResult.(map[string]interface{})["tables"].([]map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid table result format")
-	}
-
-	// For each table, get its columns
-	var tablesWithColumns []map[string]interface{}
-	for _, table := range tables {
-		tableName, ok := table["name"].(string)
-		if !ok {
-			continue
-		}
-
-		columnsResult, err := getColumns(ctx, tableName)
-		if err != nil {
-			// Log error but continue
-			log.Printf("Error getting columns for table %s: %v", tableName, err)
-			table["columns"] = []map[string]interface{}{}
-		} else {
-			columns, ok := columnsResult.(map[string]interface{})["columns"].([]map[string]interface{})
-			if ok {
-				table["columns"] = columns
-			} else {
-				table["columns"] = []map[string]interface{}{}
-			}
-		}
-
-		tablesWithColumns = append(tablesWithColumns, table)
+	// Get all relationships
+	relationships, relErr := getRelationships(ctx, db, "")
+	if relErr != nil {
+		return nil, fmt.Errorf("failed to get relationships: %w", relErr)
 	}
 
 	return map[string]interface{}{
-		"tables":        tablesWithColumns,
-		"relationships": relationshipsResult.(map[string]interface{})["relationships"],
-		"type":          dbConfig.Type,
+		"tables":        tables,
+		"schema":        fullSchema,
+		"relationships": relationships.(map[string]interface{})["relationships"],
 	}, nil
 }
 

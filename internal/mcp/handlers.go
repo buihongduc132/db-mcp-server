@@ -184,6 +184,21 @@ func (h *Handler) Initialize(req *jsonrpc.Request, sess *session.Session) (inter
 		}
 	}
 
+	// Format tools for the response
+	toolsData := make([]map[string]interface{}, 0, len(tools))
+	for _, tool := range tools {
+		toolData := map[string]interface{}{
+			"name":        tool.Name,
+			"description": tool.Description,
+			"inputSchema": map[string]interface{}{
+				"type":       tool.InputSchema.Type,
+				"properties": tool.InputSchema.Properties,
+				"required":   tool.InputSchema.Required,
+			},
+		}
+		toolsData = append(toolsData, toolData)
+	}
+
 	// Create response with the capabilities in the format expected by clients
 	response := map[string]interface{}{
 		"protocolVersion": ProtocolVersion,
@@ -195,7 +210,9 @@ func (h *Handler) Initialize(req *jsonrpc.Request, sess *session.Session) (inter
 			"logging":   map[string]interface{}{},
 			"prompts":   map[string]interface{}{"listChanged": true},
 			"resources": map[string]interface{}{"subscribe": true, "listChanged": true},
-			"tools":     map[string]interface{}{},
+			"tools": map[string]interface{}{
+				"available": toolsData,
+			},
 		},
 	}
 
@@ -204,7 +221,7 @@ func (h *Handler) Initialize(req *jsonrpc.Request, sess *session.Session) (inter
 		// Send the notification after a brief delay
 		go func() {
 			// Wait a short time for client to process initialization
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 
 			// Use the new notification method
 			h.NotifyToolsChanged(sess)
@@ -730,34 +747,47 @@ func (h *Handler) HandleToolsListChanged(req *jsonrpc.Request, sess *session.Ses
 	return response, nil
 }
 
-// NotifyToolsChanged sends a tools/list_changed notification to the client
-// if the session has been initialized. This matches the behavior in mcp-go.
+// NotifyToolsChanged notifies the client that the tools list has changed
 func (h *Handler) NotifyToolsChanged(sess *session.Session) {
-	// Only send notification if session is initialized
-	if !sess.IsInitialized() {
-		logger.Debug("Not sending tools changed notification - session not initialized")
-		return
+	logger.Info("Sending tools/list_changed notification")
+
+	// Get all tools from the registry
+	allTools := h.toolRegistry.GetAllTools()
+
+	// Format tools according to the expected format
+	toolsData := make([]map[string]interface{}, 0, len(allTools))
+	for _, tool := range allTools {
+		// Format the tool data exactly as expected by the client
+		toolData := map[string]interface{}{
+			"name":        tool.Name,
+			"description": tool.Description,
+			"inputSchema": map[string]interface{}{
+				"type":       tool.InputSchema.Type,
+				"properties": tool.InputSchema.Properties,
+				"required":   tool.InputSchema.Required,
+			},
+		}
+		toolsData = append(toolsData, toolData)
 	}
 
-	// Create a formal notification format for tools/list_changed
-	notification := map[string]interface{}{
+	// Create notification params
+	params := map[string]interface{}{
+		"tools": toolsData,
+	}
+
+	// Create notification payload
+	notificationPayload := map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "notifications/tools/list_changed",
-		"params":  map[string]interface{}{},
+		"params":  params,
 	}
 
-	// Convert to JSON
-	notificationJSON, err := json.Marshal(notification)
-	if err != nil {
-		logger.Error("Failed to marshal tools/list_changed notification: %v", err)
-		return
-	}
+	// Convert to JSON for logging
+	payloadJSON, _ := json.Marshal(notificationPayload)
+	logger.Debug("Notification payload: %s", string(payloadJSON))
 
-	logger.Info("Sending tools/list_changed notification")
-	logger.Debug("Notification payload: %s", string(notificationJSON))
-
-	// Send directly as a message event
-	if err := sess.SendEvent("message", notificationJSON); err != nil {
-		logger.Error("Failed to send tools/list_changed notification: %v", err)
+	// Send the notification
+	if err := h.SendNotificationToClient(sess, "notifications/tools/list_changed", params); err != nil {
+		logger.Error("Failed to send tools list changed notification: %v", err)
 	}
 }
