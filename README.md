@@ -142,7 +142,25 @@ The server supports two transport modes:
 
 ```bash
 # Run in STDIO mode (e.g., for Cursor integration)
-./server -t stdio -config config.json
+<path-to-db-mcp-server>/server -t stdio -c <path-to-your-db-config>config.json
+```
+
+#### Example config for Cursor
+
+```json
+{
+    "mcpServers": {
+        "stdio-db-mcp-server": {
+            "command": "<path-to-dir>/db-mcp-server/server",
+            "args": [
+                "-t",
+                "stdio",
+                "-c",
+                "<your-dir>/database_config.json"
+            ]
+        }
+    }
+}
 ```
 
 For Cursor integration, you can use the provided scripts:
