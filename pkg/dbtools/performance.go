@@ -5,14 +5,8 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"sort"
 	"strings"
-	"sync"
 	"time"
-
-	"github.com/FreePeak/db-mcp-server/internal/logger"
-	"github.com/FreePeak/db-mcp-server/pkg/db"
-	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
 // QueryMetrics stores performance metrics for a database query
@@ -26,461 +20,328 @@ type QueryMetrics struct {
 	LastExecuted  time.Time     // When the query was last executed
 }
 
-// PerformanceAnalyzer tracks and analyzes database query performance
+// PerformanceAnalyzer tracks query performance and provides optimization suggestions
 type PerformanceAnalyzer struct {
-	metrics       map[string]*QueryMetrics // Map of query metrics keyed by normalized query string
-	slowThreshold time.Duration            // Threshold for identifying slow queries (default: 500ms)
-	mutex         sync.RWMutex             // Mutex for thread-safe access to metrics
-	enabled       bool                     // Whether performance analysis is enabled
+	slowThreshold time.Duration
+	queryHistory  []QueryRecord
+	maxHistory    int
 }
 
-// NewPerformanceAnalyzer creates a new performance analyzer with default settings
+// QueryRecord stores information about a query execution
+type QueryRecord struct {
+	Query      string        `json:"query"`
+	Params     []interface{} `json:"params"`
+	Duration   time.Duration `json:"duration"`
+	StartTime  time.Time     `json:"startTime"`
+	Error      string        `json:"error,omitempty"`
+	Optimized  bool          `json:"optimized"`
+	Suggestion string        `json:"suggestion,omitempty"`
+}
+
+// SQLIssueDetector detects potential issues in SQL queries
+type SQLIssueDetector struct {
+	patterns map[string]*regexp.Regexp
+}
+
+// singleton instance
+var performanceAnalyzer *PerformanceAnalyzer
+
+// GetPerformanceAnalyzer returns the singleton performance analyzer
+func GetPerformanceAnalyzer() *PerformanceAnalyzer {
+	if performanceAnalyzer == nil {
+		performanceAnalyzer = NewPerformanceAnalyzer()
+	}
+	return performanceAnalyzer
+}
+
+// NewPerformanceAnalyzer creates a new performance analyzer
 func NewPerformanceAnalyzer() *PerformanceAnalyzer {
 	return &PerformanceAnalyzer{
-		metrics:       make(map[string]*QueryMetrics),
-		slowThreshold: 500 * time.Millisecond,
-		enabled:       true,
+		slowThreshold: 500 * time.Millisecond, // Default: 500ms
+		queryHistory:  make([]QueryRecord, 0),
+		maxHistory:    100, // Default: store last 100 queries
 	}
 }
 
-// TrackQuery wraps a database query execution to track its performance
-func (pa *PerformanceAnalyzer) TrackQuery(ctx context.Context, query string, params []interface{}, fn func() (interface{}, error)) (interface{}, error) {
-	if !pa.enabled {
-		return fn()
-	}
-
-	// Start timing
-	startTime := time.Now()
-
-	// Execute the query
-	result, err := fn()
-
-	// Calculate duration
-	duration := time.Since(startTime)
-
-	// Log slow queries immediately
+// LogSlowQuery logs a warning if a query takes longer than the slow query threshold
+func (pa *PerformanceAnalyzer) LogSlowQuery(query string, params []interface{}, duration time.Duration) {
 	if duration >= pa.slowThreshold {
 		paramStr := formatParams(params)
-		logger.Warn("Slow query detected (%.2fms): %s [params: %s]",
-			float64(duration.Milliseconds()), query, paramStr)
+		log.Printf("Slow query detected (%.2fms): %s [params: %s]",
+			float64(duration.Microseconds())/1000.0,
+			query,
+			paramStr)
+	}
+}
+
+// TrackQuery tracks the execution of a query and logs slow queries
+func (pa *PerformanceAnalyzer) TrackQuery(ctx context.Context, query string, params []interface{}, exec func() (interface{}, error)) (interface{}, error) {
+	startTime := time.Now()
+	result, err := exec()
+	duration := time.Since(startTime)
+
+	// Create query record
+	record := QueryRecord{
+		Query:     query,
+		Params:    params,
+		Duration:  duration,
+		StartTime: startTime,
 	}
 
-	// Update metrics asynchronously to avoid performance impact
-	go pa.updateMetrics(query, duration)
+	// Check if query is slow
+	if duration >= pa.slowThreshold {
+		pa.LogSlowQuery(query, params, duration)
+		record.Suggestion = "Query execution time exceeds threshold"
+	}
+
+	// Record error if any
+	if err != nil {
+		record.Error = err.Error()
+	}
+
+	// Add to history (keeping max size)
+	pa.queryHistory = append(pa.queryHistory, record)
+	if len(pa.queryHistory) > pa.maxHistory {
+		pa.queryHistory = pa.queryHistory[1:]
+	}
 
 	return result, err
 }
 
-// updateMetrics updates the performance metrics for a query
-func (pa *PerformanceAnalyzer) updateMetrics(query string, duration time.Duration) {
-	// Normalize the query by removing specific parameter values
-	normalizedQuery := normalizeQuery(query)
+// SQLIssueDetector methods
 
-	pa.mutex.Lock()
-	defer pa.mutex.Unlock()
-
-	// Get or create metrics for this query
-	metrics, ok := pa.metrics[normalizedQuery]
-	if !ok {
-		metrics = &QueryMetrics{
-			Query:        query,
-			MinDuration:  duration,
-			MaxDuration:  duration,
-			LastExecuted: time.Now(),
-		}
-		pa.metrics[normalizedQuery] = metrics
+// NewSQLIssueDetector creates a new SQL issue detector
+func NewSQLIssueDetector() *SQLIssueDetector {
+	detector := &SQLIssueDetector{
+		patterns: make(map[string]*regexp.Regexp),
 	}
 
-	// Update metrics
-	metrics.Count++
-	metrics.TotalDuration += duration
-	metrics.AvgDuration = metrics.TotalDuration / time.Duration(metrics.Count)
-	metrics.LastExecuted = time.Now()
+	// Add known issue patterns
+	detector.AddPattern("cartesian-join", `SELECT.*FROM\s+(\w+)\s*,\s*(\w+)`)
+	detector.AddPattern("select-star", `SELECT\s+\*\s+FROM`)
+	detector.AddPattern("missing-where", `(DELETE\s+FROM|UPDATE)\s+\w+\s+(?:SET\s+(?:\w+\s*=\s*[^,]+)(?:\s*,\s*\w+\s*=\s*[^,]+)*\s*)*(;|\z)`)
+	detector.AddPattern("or-in-where", `WHERE.*\s+OR\s+`)
+	detector.AddPattern("in-with-many-items", `IN\s*\(\s*(?:'[^']*'\s*,\s*){10,}`)
+	detector.AddPattern("not-in", `NOT\s+IN\s*\(`)
+	detector.AddPattern("is-null", `IS\s+NULL`)
+	detector.AddPattern("function-on-column", `WHERE\s+\w+\s*\(\s*\w+\s*\)`)
+	detector.AddPattern("order-by-rand", `ORDER\s+BY\s+RAND\(\)`)
+	detector.AddPattern("group-by-number", `GROUP\s+BY\s+\d+`)
+	detector.AddPattern("having-without-group", `HAVING.*(?:(?:GROUP\s+BY.*$)|(?:$))`)
 
-	if duration < metrics.MinDuration {
-		metrics.MinDuration = duration
-	}
-	if duration > metrics.MaxDuration {
-		metrics.MaxDuration = duration
-	}
+	return detector
 }
 
-// GetSlowQueries returns the list of slow queries that exceed the threshold
-func (pa *PerformanceAnalyzer) GetSlowQueries() []*QueryMetrics {
-	pa.mutex.RLock()
-	defer pa.mutex.RUnlock()
-
-	var slowQueries []*QueryMetrics
-	for _, metrics := range pa.metrics {
-		if metrics.AvgDuration >= pa.slowThreshold {
-			slowQueries = append(slowQueries, metrics)
-		}
-	}
-
-	// Sort by average duration (slowest first)
-	sort.Slice(slowQueries, func(i, j int) bool {
-		return slowQueries[i].AvgDuration > slowQueries[j].AvgDuration
-	})
-
-	return slowQueries
-}
-
-// SetSlowThreshold sets the threshold for identifying slow queries
-func (pa *PerformanceAnalyzer) SetSlowThreshold(threshold time.Duration) {
-	pa.mutex.Lock()
-	defer pa.mutex.Unlock()
-	pa.slowThreshold = threshold
-}
-
-// Enable enables performance analysis
-func (pa *PerformanceAnalyzer) Enable() {
-	pa.mutex.Lock()
-	defer pa.mutex.Unlock()
-	pa.enabled = true
-}
-
-// Disable disables performance analysis
-func (pa *PerformanceAnalyzer) Disable() {
-	pa.mutex.Lock()
-	defer pa.mutex.Unlock()
-	pa.enabled = false
-}
-
-// Reset clears all collected metrics
-func (pa *PerformanceAnalyzer) Reset() {
-	pa.mutex.Lock()
-	defer pa.mutex.Unlock()
-	pa.metrics = make(map[string]*QueryMetrics)
-}
-
-// GetAllMetrics returns all collected query metrics sorted by average duration
-func (pa *PerformanceAnalyzer) GetAllMetrics() []*QueryMetrics {
-	pa.mutex.RLock()
-	defer pa.mutex.RUnlock()
-
-	metrics := make([]*QueryMetrics, 0, len(pa.metrics))
-	for _, m := range pa.metrics {
-		metrics = append(metrics, m)
-	}
-
-	// Sort by average duration (slowest first)
-	sort.Slice(metrics, func(i, j int) bool {
-		return metrics[i].AvgDuration > metrics[j].AvgDuration
-	})
-
-	return metrics
-}
-
-// normalizeQuery removes specific parameter values from a query for grouping similar queries
-func normalizeQuery(query string) string {
-	// Simplistic normalization - replace numbers and quoted strings with placeholders
-	// In a real-world scenario, use a more sophisticated SQL parser
-	normalized := query
-
-	// Replace quoted strings with placeholders
-	normalized = replaceRegex(normalized, `'[^']*'`, "'?'")
-	normalized = replaceRegex(normalized, `"[^"]*"`, "\"?\"")
-
-	// Replace numbers with placeholders
-	normalized = replaceRegex(normalized, `\b\d+\b`, "?")
-
-	// Remove extra whitespace
-	normalized = replaceRegex(normalized, `\s+`, " ")
-
-	return strings.TrimSpace(normalized)
-}
-
-// replaceRegex is a simple helper to replace regex matches
-func replaceRegex(input, pattern, replacement string) string {
-	// Use the regexp package for proper regex handling
-	re, err := regexp.Compile(pattern)
+// AddPattern adds a pattern for detecting SQL issues
+func (d *SQLIssueDetector) AddPattern(name, pattern string) {
+	re, err := regexp.Compile("(?i)" + pattern)
 	if err != nil {
-		// If there's an error with the regex, just return the input
-		logger.Error("Error compiling regex pattern '%s': %v", pattern, err)
-		return input
+		log.Printf("Error compiling regex pattern '%s': %v", pattern, err)
+		return
 	}
-
-	return re.ReplaceAllString(input, replacement)
+	d.patterns[name] = re
 }
 
-// formatParams formats query parameters for logging
+// DetectIssues detects issues in a SQL query
+func (d *SQLIssueDetector) DetectIssues(query string) map[string]string {
+	issues := make(map[string]string)
+
+	for name, pattern := range d.patterns {
+		if pattern.MatchString(query) {
+			issues[name] = d.getSuggestionForIssue(name)
+		}
+	}
+
+	return issues
+}
+
+// getSuggestionForIssue returns a suggestion for a detected issue
+func (d *SQLIssueDetector) getSuggestionForIssue(issue string) string {
+	suggestions := map[string]string{
+		"cartesian-join":       "Use explicit JOIN statements instead of comma-syntax joins to avoid unintended Cartesian products.",
+		"select-star":          "Specify exact columns needed instead of SELECT * to reduce network traffic and improve query execution.",
+		"missing-where":        "Add a WHERE clause to avoid affecting all rows in the table.",
+		"or-in-where":          "Consider using IN instead of multiple OR conditions for better performance.",
+		"in-with-many-items":   "Too many items in IN clause; consider a temporary table or a JOIN instead.",
+		"not-in":               "NOT IN with subqueries can be slow. Consider using NOT EXISTS or LEFT JOIN/IS NULL pattern.",
+		"is-null":              "IS NULL conditions prevent index usage. Consider redesigning to avoid NULL values if possible.",
+		"function-on-column":   "Applying functions to columns in WHERE clauses prevents index usage. Restructure if possible.",
+		"order-by-rand":        "ORDER BY RAND() causes full table scan and sort. Consider alternative randomization methods.",
+		"group-by-number":      "Using column position numbers in GROUP BY can be error-prone. Use explicit column names.",
+		"having-without-group": "HAVING without GROUP BY may indicate a logical error in query structure.",
+	}
+
+	if suggestion, ok := suggestions[issue]; ok {
+		return suggestion
+	}
+
+	return "Potential issue detected; review query for optimization opportunities."
+}
+
+// Helper functions
+
+// formatParams converts query parameters to a readable string format
 func formatParams(params []interface{}) string {
 	if len(params) == 0 {
 		return "none"
 	}
 
-	parts := make([]string, len(params))
+	paramStrings := make([]string, len(params))
 	for i, param := range params {
-		parts[i] = fmt.Sprintf("%v", param)
+		if param == nil {
+			paramStrings[i] = "NULL"
+		} else {
+			paramStrings[i] = fmt.Sprintf("%v", param)
+		}
 	}
 
-	return strings.Join(parts, ", ")
+	return "[" + strings.Join(paramStrings, ", ") + "]"
 }
 
-// AnalyzeQuery provides optimization suggestions for a given query
-func AnalyzeQuery(query string) []string {
-	suggestions := []string{}
+// Placeholder for future implementation
+// Currently not used but kept for reference
+/*
+func handlePerformanceAnalyzer(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	// This function will be implemented in the future
+	return nil, fmt.Errorf("not implemented")
+}
+*/
 
-	// Check for SELECT *
+// StripComments removes SQL comments from a query string
+func StripComments(input string) string {
+	// Strip /* ... */ comments
+	multiLineRe, err := regexp.Compile(`/\*[\s\S]*?\*/`)
+	if err != nil {
+		// If there's an error with the regex, just return the input
+		log.Printf("Error compiling regex pattern '%s': %v", `\/\*[\s\S]*?\*\/`, err)
+		return input
+	}
+	withoutMultiLine := multiLineRe.ReplaceAllString(input, "")
+
+	// Strip -- comments
+	singleLineRe, err := regexp.Compile(`--.*$`)
+	if err != nil {
+		return withoutMultiLine
+	}
+	return singleLineRe.ReplaceAllString(withoutMultiLine, "")
+}
+
+// GetAllMetrics returns all collected metrics
+func (pa *PerformanceAnalyzer) GetAllMetrics() []*QueryMetrics {
+	// Group query history by normalized query text
+	queryMap := make(map[string]*QueryMetrics)
+
+	for _, record := range pa.queryHistory {
+		normalizedQuery := normalizeQuery(record.Query)
+
+		metrics, exists := queryMap[normalizedQuery]
+		if !exists {
+			metrics = &QueryMetrics{
+				Query:        record.Query,
+				MinDuration:  record.Duration,
+				MaxDuration:  record.Duration,
+				LastExecuted: record.StartTime,
+			}
+			queryMap[normalizedQuery] = metrics
+		}
+
+		// Update metrics
+		metrics.Count++
+		metrics.TotalDuration += record.Duration
+
+		if record.Duration < metrics.MinDuration {
+			metrics.MinDuration = record.Duration
+		}
+
+		if record.Duration > metrics.MaxDuration {
+			metrics.MaxDuration = record.Duration
+		}
+
+		if record.StartTime.After(metrics.LastExecuted) {
+			metrics.LastExecuted = record.StartTime
+		}
+	}
+
+	// Calculate averages and convert to slice
+	metrics := make([]*QueryMetrics, 0, len(queryMap))
+	for _, m := range queryMap {
+		m.AvgDuration = time.Duration(int64(m.TotalDuration) / int64(m.Count))
+		metrics = append(metrics, m)
+	}
+
+	return metrics
+}
+
+// Reset clears all collected metrics
+func (pa *PerformanceAnalyzer) Reset() {
+	pa.queryHistory = make([]QueryRecord, 0)
+}
+
+// GetSlowThreshold returns the current slow query threshold
+func (pa *PerformanceAnalyzer) GetSlowThreshold() time.Duration {
+	return pa.slowThreshold
+}
+
+// SetSlowThreshold sets the slow query threshold
+func (pa *PerformanceAnalyzer) SetSlowThreshold(threshold time.Duration) {
+	pa.slowThreshold = threshold
+}
+
+// AnalyzeQuery analyzes a SQL query and returns optimization suggestions
+func AnalyzeQuery(query string) []string {
+	// Create detector and get suggestions
+	detector := NewSQLIssueDetector()
+	issues := detector.DetectIssues(query)
+
+	suggestions := make([]string, 0, len(issues))
+	for _, suggestion := range issues {
+		suggestions = append(suggestions, suggestion)
+	}
+
+	// Add default suggestions for query patterns
 	if strings.Contains(strings.ToUpper(query), "SELECT *") {
 		suggestions = append(suggestions, "Avoid using SELECT * - specify only the columns you need")
 	}
 
-	// Check for missing WHERE clause in non-aggregate queries
-	if strings.Contains(strings.ToUpper(query), "SELECT") &&
-		!strings.Contains(strings.ToUpper(query), "WHERE") &&
-		!strings.Contains(strings.ToUpper(query), "GROUP BY") {
+	if !strings.Contains(strings.ToUpper(query), "WHERE") &&
+		!strings.Contains(strings.ToUpper(query), "JOIN") {
 		suggestions = append(suggestions, "Consider adding a WHERE clause to limit the result set")
 	}
 
-	// Check for potential JOINs without conditions
 	if strings.Contains(strings.ToUpper(query), "JOIN") &&
-		!strings.Contains(strings.ToUpper(query), "ON") &&
-		!strings.Contains(strings.ToUpper(query), "USING") {
+		!strings.Contains(strings.ToUpper(query), "ON") {
 		suggestions = append(suggestions, "Ensure all JOINs have proper conditions")
 	}
 
-	// Check for ORDER BY on non-indexed columns (simplified check)
 	if strings.Contains(strings.ToUpper(query), "ORDER BY") {
 		suggestions = append(suggestions, "Verify that ORDER BY columns are properly indexed")
 	}
 
-	// Check for potential subqueries that could be joins
-	if strings.Contains(strings.ToUpper(query), "SELECT") &&
-		strings.Contains(strings.ToUpper(query), "IN (SELECT") {
+	if strings.Contains(query, "(SELECT") {
 		suggestions = append(suggestions, "Consider replacing subqueries with JOINs where possible")
-	}
-
-	// Add generic suggestions if none found
-	if len(suggestions) == 0 {
-		suggestions = append(suggestions,
-			"Consider adding appropriate indexes for frequently queried columns",
-			"Review query execution plan with EXPLAIN to identify bottlenecks")
 	}
 
 	return suggestions
 }
 
-// Global instance of the performance analyzer
-var performanceAnalyzer *PerformanceAnalyzer
+// normalizeQuery standardizes SQL queries for comparison by replacing literals
+func normalizeQuery(query string) string {
+	// Trim and normalize whitespace
+	query = strings.TrimSpace(query)
+	wsRegex := regexp.MustCompile(`\s+`)
+	query = wsRegex.ReplaceAllString(query, " ")
 
-// InitPerformanceAnalyzer initializes the global performance analyzer
-func InitPerformanceAnalyzer() {
-	performanceAnalyzer = NewPerformanceAnalyzer()
-}
+	// Replace numeric literals
+	numRegex := regexp.MustCompile(`\b\d+\b`)
+	query = numRegex.ReplaceAllString(query, "?")
 
-// GetPerformanceAnalyzer returns the global performance analyzer instance
-func GetPerformanceAnalyzer() *PerformanceAnalyzer {
-	if performanceAnalyzer == nil {
-		InitPerformanceAnalyzer()
-	}
-	return performanceAnalyzer
-}
+	// Replace string literals in single quotes
+	strRegex := regexp.MustCompile(`'[^']*'`)
+	query = strRegex.ReplaceAllString(query, "'?'")
 
-// createPerformanceAnalyzerTool creates a tool for analyzing database performance
-//
-//nolint:unused // Retained for future use
-func createPerformanceAnalyzerTool() *tools.Tool {
-	return &tools.Tool{
-		Name:        "dbPerformanceAnalyzer",
-		Description: "Identify slow queries and optimization opportunities",
-		Category:    "database",
-		InputSchema: tools.ToolInputSchema{
-			Type: "object",
-			Properties: map[string]interface{}{
-				"action": map[string]interface{}{
-					"type":        "string",
-					"description": "Action to perform (getSlowQueries, getMetrics, analyzeQuery, reset, setThreshold)",
-					"enum":        []string{"getSlowQueries", "getMetrics", "analyzeQuery", "reset", "setThreshold"},
-				},
-				"query": map[string]interface{}{
-					"type":        "string",
-					"description": "SQL query to analyze",
-				},
-				"threshold": map[string]interface{}{
-					"type":        "integer",
-					"description": "Threshold in milliseconds for identifying slow queries (required for setThreshold action)",
-				},
-				"limit": map[string]interface{}{
-					"type":        "integer",
-					"description": "Maximum number of results to return (default: 10)",
-				},
-				"database": map[string]interface{}{
-					"type":        "string",
-					"description": "Database ID to use (optional if only one database is configured)",
-				},
-			},
-			Required: []string{"query", "database"},
-		},
-		Handler: handlePerformanceAnalyzer,
-	}
-}
+	// Replace string literals in double quotes
+	dblQuoteRegex := regexp.MustCompile(`"[^"]*"`)
+	query = dblQuoteRegex.ReplaceAllString(query, "\"?\"")
 
-// handlePerformanceAnalyzer handles the performance analyzer tool execution
-func handlePerformanceAnalyzer(ctx context.Context, params map[string]interface{}) (interface{}, error) {
-	// Check if database manager is initialized
-	if dbManager == nil {
-		return nil, fmt.Errorf("database manager not initialized")
-	}
-
-	// Extract parameters
-	action, ok := getStringParam(params, "action")
-	if !ok {
-		return nil, fmt.Errorf("action parameter is required")
-	}
-
-	// Get database ID
-	databaseID, ok := getStringParam(params, "database")
-	if !ok {
-		return nil, fmt.Errorf("database parameter is required")
-	}
-
-	// Get database instance
-	db, err := dbManager.GetDB(databaseID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get database: %w", err)
-	}
-
-	// Extract optional parameters
-	query, _ := getStringParam(params, "query")
-	threshold, _ := getIntParam(params, "threshold")
-	limit, hasLimit := getIntParam(params, "limit")
-	if !hasLimit {
-		limit = 10 // Default limit
-	}
-
-	// Create context with timeout
-	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	// Execute requested action
-	switch action {
-	case "getSlowQueries":
-		return getSlowQueries(timeoutCtx, db, limit)
-	case "getMetrics":
-		return getMetrics(timeoutCtx, db)
-	case "analyzeQuery":
-		if query == "" {
-			return nil, fmt.Errorf("query parameter is required for analyzeQuery action")
-		}
-		return analyzeQuery(timeoutCtx, db, query)
-	case "reset":
-		return resetPerformanceStats(timeoutCtx, db)
-	case "setThreshold":
-		if threshold <= 0 {
-			return nil, fmt.Errorf("threshold parameter must be a positive integer")
-		}
-		return setSlowQueryThreshold(timeoutCtx, db, threshold)
-	default:
-		return nil, fmt.Errorf("invalid action: %s", action)
-	}
-}
-
-// getSlowQueries retrieves slow queries from the database
-func getSlowQueries(ctx context.Context, db db.Database, limit int) (interface{}, error) {
-	query := `
-		SELECT query, calls, total_time, mean_time, rows
-		FROM pg_stat_statements
-		WHERE total_time > 0
-		ORDER BY mean_time DESC
-		LIMIT $1
-	`
-	rows, err := db.Query(ctx, query, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get slow queries: %w", err)
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("error closing rows: %v", closeErr)
-		}
-	}()
-
-	results, err := rowsToMaps(rows)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process slow queries: %w", err)
-	}
-
-	return map[string]interface{}{
-		"slow_queries": results,
-		"count":        len(results),
-	}, nil
-}
-
-// getMetrics retrieves database performance metrics
-func getMetrics(ctx context.Context, db db.Database) (interface{}, error) {
-	query := `
-		SELECT * FROM pg_stat_database
-		WHERE datname = current_database()
-	`
-	rows, err := db.Query(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get metrics: %w", err)
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("error closing rows: %v", closeErr)
-		}
-	}()
-
-	results, err := rowsToMaps(rows)
-	if err != nil {
-		return nil, fmt.Errorf("failed to process metrics: %w", err)
-	}
-
-	return map[string]interface{}{
-		"metrics": results[0], // Only one row for current database
-	}, nil
-}
-
-// analyzeQuery analyzes a specific query for performance
-func analyzeQuery(ctx context.Context, db db.Database, query string) (interface{}, error) {
-	explainQuery := "EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS) " + query
-	rows, err := db.Query(ctx, explainQuery)
-	if err != nil {
-		return nil, fmt.Errorf("failed to analyze query: %w", err)
-	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			log.Printf("error closing rows: %v", err)
-		}
-	}()
-
-	var plan []byte
-	if !rows.Next() {
-		return nil, fmt.Errorf("no explain plan returned")
-	}
-	if err := rows.Scan(&plan); err != nil {
-		return nil, fmt.Errorf("failed to scan explain plan: %w", err)
-	}
-
-	return map[string]interface{}{
-		"query": query,
-		"plan":  string(plan),
-	}, nil
-}
-
-// resetPerformanceStats resets performance statistics
-func resetPerformanceStats(ctx context.Context, db db.Database) (interface{}, error) {
-	_, err := db.Exec(ctx, "SELECT pg_stat_reset()")
-	if err != nil {
-		return nil, fmt.Errorf("failed to reset performance stats: %w", err)
-	}
-
-	return map[string]interface{}{
-		"status":  "success",
-		"message": "Performance statistics have been reset",
-	}, nil
-}
-
-// setSlowQueryThreshold sets the threshold for slow query logging
-func setSlowQueryThreshold(ctx context.Context, db db.Database, threshold int) (interface{}, error) {
-	_, err := db.Exec(ctx, "ALTER SYSTEM SET log_min_duration_statement = $1", threshold)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set slow query threshold: %w", err)
-	}
-
-	return map[string]interface{}{
-		"status":  "success",
-		"message": fmt.Sprintf("Slow query threshold set to %d ms", threshold),
-	}, nil
+	return query
 }

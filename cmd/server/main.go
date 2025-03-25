@@ -11,308 +11,100 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/FreePeak/db-mcp-server/internal/config"
-	"github.com/FreePeak/db-mcp-server/internal/logger"
-	"github.com/FreePeak/db-mcp-server/internal/mcp"
-	"github.com/FreePeak/db-mcp-server/internal/session"
-	"github.com/FreePeak/db-mcp-server/internal/transport"
+	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/FreePeak/db-mcp-server/internal/delivery/mcp"
+	"github.com/FreePeak/db-mcp-server/internal/repository"
+	"github.com/FreePeak/db-mcp-server/internal/usecase"
 	"github.com/FreePeak/db-mcp-server/pkg/dbtools"
-	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
-// Server represents the MCP server instance
-type Server struct {
-	registry       *tools.Registry
-	sessionManager *session.Manager
-	config         *config.Config
-}
-
-func (s *Server) startSSEServer() error {
-	// Create SSE transport
-	basePath := fmt.Sprintf("http://localhost:%d", s.config.ServerPort)
-	sseTransport := transport.NewSSETransport(s.sessionManager, basePath)
-
-	// Create MCP handler with the tool registry
-	mcpHandler := mcp.NewHandler(s.registry)
-
-	// Register MCP handler with transport
-	for method, handler := range mcpHandler.GetAllMethodHandlers() {
-		sseTransport.RegisterMethodHandler(method, handler)
-	}
-
-	// Create HTTP server
-	mux := http.NewServeMux()
-	mux.Handle("/sse", http.HandlerFunc(sseTransport.HandleSSE))
-	mux.Handle("/message", http.HandlerFunc(sseTransport.HandleMessage))
-
-	// Create server with graceful shutdown
-	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.config.ServerPort),
-		Handler: mux,
-	}
-
-	// Channel to listen for errors coming from the server
-	serverErrors := make(chan error, 1)
-
-	// Start server
-	go func() {
-		serverErrors <- srv.ListenAndServe()
-	}()
-
-	// Listen for interrupt signal
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
-
-	// Wait for interrupt signal
-	select {
-	case err := <-serverErrors:
-		return fmt.Errorf("server error: %w", err)
-	case <-stop:
-		logger.Info("Shutting down server...")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		if err := srv.Shutdown(ctx); err != nil {
-			return fmt.Errorf("failed to shutdown server: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func (s *Server) startStdioServer() error {
-	// Create MCP handler with the tool registry
-	mcpHandler := mcp.NewHandler(s.registry)
-
-	// Create STDIO transport
-	stdioTransport := transport.NewStdioTransport(s.sessionManager)
-
-	// Register MCP handler with transport
-	for method, handler := range mcpHandler.GetAllMethodHandlers() {
-		stdioTransport.RegisterMethodHandler(method, handler)
-	}
-
-	// Start the transport
-	if err := stdioTransport.Start(); err != nil {
-		return fmt.Errorf("failed to start STDIO transport: %w", err)
-	}
-
-	// Log that we've started
-	logger.Info("STDIO transport started, waiting for requests on stdin...")
-
-	// Create a channel for OS signals
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	// Wait for a signal
-	<-sigs
-	logger.Info("Received shutdown signal, stopping server...")
-
-	// Stop the transport
-	stdioTransport.Stop()
-
-	return nil
-}
-
 func main() {
-	// Initialize random number generator
-	// As of Go 1.20, rand.Seed is no longer necessary
-
-	// Parse command line flags
-	transportMode := flag.String("t", "", "Transport mode (sse or stdio)")
-	serverPort := flag.Int("port", 0, "Server port")
-	configFile := flag.String("config", "", "Path to database configuration file")
+	// Parse command-line arguments
+	configFile := flag.String("c", "config.json", "Database configuration file")
+	transportMode := flag.String("t", "sse", "Transport mode (stdio or sse)")
+	serverPort := flag.Int("p", 9092, "Server port for SSE transport")
+	serverHost := flag.String("h", "localhost", "Server host for SSE transport")
 	flag.Parse()
 
-	// Load configuration
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+	// Initialize database connection from config
+	dbConfig := &dbtools.Config{
+		ConfigFile: *configFile,
 	}
 
-	// Initialize logger with debug level
-	if cfg.TransportMode == "stdio" {
-		// In STDIO mode, explicitly redirect logs to stderr to avoid mixing with JSON responses
-		logger.InitializeWithWriter("debug", os.Stderr)
-	} else {
-		logger.Initialize("debug")
+	// Try to initialize database from config
+	if err := dbtools.InitDatabase(dbConfig); err != nil {
+		log.Printf("Warning: Failed to initialize database: %v", err)
 	}
 
-	// Override configuration with command line flags if provided
-	if *transportMode != "" {
-		cfg.TransportMode = *transportMode
-	}
-	if *serverPort != 0 {
-		cfg.ServerPort = *serverPort
-	}
-	if *configFile != "" {
-		cfg.DBConfigFile = *configFile
-	}
-
-	// Initialize session manager
-	sessionManager := session.NewManager()
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			sessionManager.CleanupSessions(30 * time.Minute)
-		}
-	}()
-
-	// Initialize tools registry
-	registry := tools.NewRegistry()
-
-	// Initialize database connections
-	var dbInitError error
-	if cfg.TransportMode == "stdio" && os.Getenv("SKIP_DB") == "true" {
-		log.Printf("Skipping database initialization for STDIO mode with SKIP_DB=true")
-	} else {
-		dbInitError = dbtools.InitDatabase(cfg)
-		if dbInitError != nil {
-			log.Printf("Warning: Failed to initialize database connections: %v", dbInitError)
-		}
-	}
-
-	// Register database tools (even if db init failed, to allow testing)
-	if err := dbtools.RegisterDatabaseTools(registry); err != nil {
-		log.Fatalf("Failed to register database tools: %v", err)
-	}
-
-	// Verify database connections only if init didn't fail
-	if dbInitError == nil {
-		ctx := context.Background()
-		dbIDs := dbtools.ListDatabases()
-		if len(dbIDs) == 0 {
-			log.Printf("Warning: No database connections configured")
-		} else {
-			for _, dbID := range dbIDs {
-				db, err := dbtools.GetDatabase(dbID)
-				if err != nil {
-					log.Printf("Warning: Failed to get database %s: %v", dbID, err)
-					continue
-				}
-				if err := db.Ping(ctx); err != nil {
-					log.Printf("Warning: Failed to ping database %s: %v", dbID, err)
-				} else {
-					log.Printf("Successfully connected to database %s", dbID)
-				}
-			}
-		}
-	}
-
-	// Create server instance
-	server := &Server{
-		registry:       registry,
-		sessionManager: sessionManager,
-		config:         cfg,
-	}
-
-	// Handle transport mode
-	switch cfg.TransportMode {
-	case "sse":
-		log.Printf("Starting server in SSE mode on port %d", cfg.ServerPort)
-		if err := server.startSSEServer(); err != nil {
-			log.Fatalf("Server error: %v", err)
-		}
-	case "stdio":
-		log.Printf("Starting server in stdio mode")
-		if err := server.startStdioServer(); err != nil {
-			log.Fatalf("Server error: %v", err)
-		}
-	default:
-		log.Fatalf("Invalid transport mode: %s", cfg.TransportMode)
-	}
-}
-
-// startSSEServer starts the server using Server-Sent Events transport
-//
-//nolint:unused // Retained for future use
-func startSSEServer(cfg *config.Config, sessionManager *session.Manager, mcpHandler *mcp.Handler) error {
-	// Create SSE transport
-	basePath := fmt.Sprintf("http://localhost:%d", cfg.ServerPort)
-	sseTransport := transport.NewSSETransport(sessionManager, basePath)
-
-	// Register method handlers
-	methodHandlers := mcpHandler.GetAllMethodHandlers()
-	for method, handler := range methodHandlers {
-		sseTransport.RegisterMethodHandler(method, handler)
-	}
-
-	// Create HTTP server
-	mux := http.NewServeMux()
-
-	// Register SSE endpoint
-	mux.HandleFunc("/sse", sseTransport.HandleSSE)
-
-	// Register message endpoint
-	mux.HandleFunc("/message", sseTransport.HandleMessage)
-
-	// Create server
-	addr := fmt.Sprintf(":%d", cfg.ServerPort)
-	server := &http.Server{
-		Addr:    addr,
-		Handler: mux,
-	}
-
-	// Start server in a goroutine
-	go func() {
-		logger.Info("Server listening on %s", addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("Server error: %v", err)
-			os.Exit(1)
-		}
-	}()
-
-	// Wait for interrupt signal
+	// Set up signal handling for clean shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
 
-	// Shutdown server gracefully
-	logger.Info("Shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Create mcp-go server
+	mcpServer := server.NewMCPServer(
+		"DB MCP Server", // Server name
+		"1.0.0",         // Server version
+	)
 
-	if err := server.Shutdown(ctx); err != nil {
-		logger.Error("Server shutdown error: %v", err)
-	}
+	// Set up Clean Architecture layers
+	dbRepo := repository.NewDatabaseRepository()
+	dbUseCase := usecase.NewDatabaseUseCase(dbRepo)
+	toolRegistry := mcp.NewToolRegistry(mcpServer, dbUseCase)
 
-	logger.Info("Server stopped")
-	return nil
-}
+	// Register tools
+	toolRegistry.RegisterAllTools()
 
-// registerDatabaseTools registers database tools with the MCP tool registry
-//
-//nolint:unused // Retained for future use
-func registerDatabaseTools(toolRegistry *tools.Registry, cfg *config.Config) error {
-	// Initialize database connections
-	if err := dbtools.InitDatabase(cfg); err != nil {
-		logger.Error("Failed to initialize databases: %v", err)
-		return fmt.Errorf("database initialization failed: %w", err)
-	}
+	// Handle transport mode
+	switch *transportMode {
+	case "sse":
+		log.Printf("Starting SSE server on port %d", *serverPort)
 
-	// Register database tools
-	if err := dbtools.RegisterDatabaseTools(toolRegistry); err != nil {
-		logger.Error("Failed to register database tools: %v", err)
-		return fmt.Errorf("failed to register database tools: %w", err)
-	}
-	logger.Info("Database tools registered successfully")
+		// Create SSE server
+		sseServer := server.NewSSEServer(
+			mcpServer,
+			server.WithBaseURL(fmt.Sprintf("http://%s:%d", *serverHost, *serverPort)),
+		)
 
-	// Verify connections to all databases
-	for _, conn := range cfg.MultiDBConfig.Connections {
-		db, err := dbtools.GetDatabase(conn.ID)
-		if err != nil {
-			logger.Error("Failed to get database connection for %s: %v", conn.ID, err)
-			return fmt.Errorf("failed to get database connection for %s: %w", conn.ID, err)
+		// Start the server
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- sseServer.Start(fmt.Sprintf(":%d", *serverPort))
+		}()
+
+		// Wait for interrupt or error
+		select {
+		case err := <-errCh:
+			log.Fatalf("Server error: %v", err)
+		case <-stop:
+			log.Println("Shutting down server...")
+
+			// Create shutdown context
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+
+			// Shutdown HTTP server
+			server := &http.Server{Addr: fmt.Sprintf(":%d", *serverPort)}
+			if err := server.Shutdown(shutdownCtx); err != nil {
+				log.Printf("Error during server shutdown: %v", err)
+			}
+
+			// Close database connections
+			if err := dbtools.CloseDatabase(); err != nil {
+				log.Printf("Error closing database connections: %v", err)
+			}
 		}
 
-		if err := db.Ping(context.Background()); err != nil {
-			logger.Error("Failed to connect to database %s: %v", conn.ID, err)
-			return fmt.Errorf("failed to connect to database %s: %w", conn.ID, err)
+	case "stdio":
+		log.Printf("Starting STDIO server")
+		// No graceful shutdown needed for stdio
+		if err := server.ServeStdio(mcpServer); err != nil {
+			log.Fatalf("STDIO server error: %v", err)
 		}
-		logger.Info("Successfully connected to database %s (%s:%d)", conn.ID, conn.Host, conn.Port)
+
+	default:
+		log.Fatalf("Invalid transport mode: %s", *transportMode)
 	}
 
-	return nil
+	log.Println("Server shutdown complete")
 }

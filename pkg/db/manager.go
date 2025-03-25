@@ -81,7 +81,7 @@ func (m *Manager) Connect() error {
 		}
 
 		if err := db.Connect(); err != nil {
-			return fmt.Errorf("failed to connect to database %s: %w", id, err)
+			return fmt.Errorf("failed to connect to database %s: %w, %#v", id, err, dbConfig)
 		}
 
 		m.connections[id] = db

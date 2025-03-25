@@ -1,7 +1,7 @@
 {
     "mcpServers": {
-        "my-testing-db-mcp-server": {
-            "url": "http://localhost:9090/sse"
+        "stido-db-mcp-server": {
+            "command": "/Users/harvey/Work/dev/FreePeak/Opensource/db-mcp-server/debug-mcp.sh"
         }
     }
   }
