@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/joho/godotenv"
@@ -19,7 +20,7 @@ type Config struct {
 	LogLevel      string
 	DBConfig      DatabaseConfig    // Legacy single database config
 	MultiDBConfig *db.MultiDBConfig // New multi-database config
-	DBConfigFile  string            // Path to database configuration file
+	ConfigPath    string            // Path to the configuration file
 }
 
 // DatabaseConfig holds database configuration (legacy support)
@@ -44,13 +45,28 @@ func LoadConfig() (*Config, error) {
 
 	port, _ := strconv.Atoi(getEnv("SERVER_PORT", "9090"))
 	dbPort, _ := strconv.Atoi(getEnv("DB_PORT", "3306"))
-	dbConfigFile := getEnv("DB_CONFIG_FILE", "config/databases.json")
+
+	// Get config path from environment or use default
+	configPath := getEnv("CONFIG_PATH", "")
+	if configPath == "" {
+		configPath = getEnv("DB_CONFIG_FILE", "config.json")
+	}
+
+	// Resolve absolute path if relative path is provided
+	if !filepath.IsAbs(configPath) {
+		absPath, err := filepath.Abs(configPath)
+		if err != nil {
+			log.Printf("Warning: Could not resolve absolute path for config file: %v", err)
+		} else {
+			configPath = absPath
+		}
+	}
 
 	config := &Config{
 		ServerPort:    port,
 		TransportMode: getEnv("TRANSPORT_MODE", "sse"),
 		LogLevel:      getEnv("LOG_LEVEL", "info"),
-		DBConfigFile:  dbConfigFile,
+		ConfigPath:    configPath,
 		DBConfig: DatabaseConfig{
 			Type:     getEnv("DB_TYPE", "mysql"),
 			Host:     getEnv("DB_HOST", "localhost"),
@@ -62,19 +78,21 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Try to load multi-database configuration from JSON file
-	if _, err := os.Stat(config.DBConfigFile); err == nil {
-		configData, err := os.ReadFile(config.DBConfigFile)
+	if _, err := os.Stat(config.ConfigPath); err == nil {
+		log.Printf("Loading configuration from: %s", config.ConfigPath)
+		configData, err := os.ReadFile(config.ConfigPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read database config file: %w", err)
+			return nil, fmt.Errorf("failed to read config file %s: %w", config.ConfigPath, err)
 		}
 
 		var multiDBConfig db.MultiDBConfig
 		if err := json.Unmarshal(configData, &multiDBConfig); err != nil {
-			return nil, fmt.Errorf("failed to parse database config file: %w", err)
+			return nil, fmt.Errorf("failed to parse config file %s: %w", config.ConfigPath, err)
 		}
 
 		config.MultiDBConfig = &multiDBConfig
 	} else {
+		log.Printf("Warning: Config file not found at %s, using environment variables", config.ConfigPath)
 		// If no JSON config found, create a single connection config from environment variables
 		config.MultiDBConfig = &db.MultiDBConfig{
 			Connections: []db.DatabaseConnectionConfig{

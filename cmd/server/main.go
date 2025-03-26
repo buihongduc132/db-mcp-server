@@ -13,6 +13,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/FreePeak/db-mcp-server/internal/config"
 	"github.com/FreePeak/db-mcp-server/internal/delivery/mcp"
 	"github.com/FreePeak/db-mcp-server/internal/repository"
 	"github.com/FreePeak/db-mcp-server/internal/usecase"
@@ -27,9 +28,31 @@ func main() {
 	serverHost := flag.String("h", "localhost", "Server host for SSE transport")
 	flag.Parse()
 
+	// Load configuration after environment variables are set
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Printf("Warning: Failed to load configuration: %v", err)
+		// Create a default config if loading fails
+		cfg = &config.Config{
+			ServerPort:    *serverPort,
+			TransportMode: *transportMode,
+			ConfigPath:    *configFile,
+		}
+	}
+	// Set environment variables from command line arguments if provided
+	if *configFile != "config.json" {
+		os.Setenv("CONFIG_PATH", *configFile)
+	}
+	if *transportMode != "sse" {
+		os.Setenv("TRANSPORT_MODE", *transportMode)
+	}
+	if *serverPort != 9092 {
+		os.Setenv("SERVER_PORT", fmt.Sprintf("%d", *serverPort))
+	}
+
 	// Initialize database connection from config
 	dbConfig := &dbtools.Config{
-		ConfigFile: *configFile,
+		ConfigFile: cfg.ConfigPath,
 	}
 
 	// Try to initialize database from config
@@ -63,16 +86,16 @@ func main() {
 	// If no database connections, register mock tools to ensure at least some tools are available
 	if len(dbIDs) == 0 {
 		log.Printf("No database connections available. Adding mock tools...")
-		toolRegistry.RegisterMockTools() // Add this method to ToolRegistry
+		toolRegistry.RegisterMockTools()
 	}
 
 	// Handle transport mode
-	switch *transportMode {
+	switch cfg.TransportMode {
 	case "sse":
-		log.Printf("Starting SSE server on port %d", *serverPort)
+		log.Printf("Starting SSE server on port %d", cfg.ServerPort)
 
 		// Configure base URL with explicit protocol
-		baseURL := fmt.Sprintf("http://%s:%d", *serverHost, *serverPort)
+		baseURL := fmt.Sprintf("http://%s:%d", *serverHost, cfg.ServerPort)
 		log.Printf("Using base URL: %s", baseURL)
 
 		// Create SSE server with options
@@ -86,7 +109,7 @@ func main() {
 		// Start the server
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- sseServer.Start(fmt.Sprintf(":%d", *serverPort))
+			errCh <- sseServer.Start(fmt.Sprintf(":%d", cfg.ServerPort))
 		}()
 
 		// Wait for interrupt or error
@@ -101,7 +124,7 @@ func main() {
 			defer shutdownCancel()
 
 			// Shutdown HTTP server
-			server := &http.Server{Addr: fmt.Sprintf(":%d", *serverPort)}
+			server := &http.Server{Addr: fmt.Sprintf(":%d", cfg.ServerPort)}
 			if err := server.Shutdown(shutdownCtx); err != nil {
 				log.Printf("Error during server shutdown: %v", err)
 			}
@@ -120,7 +143,7 @@ func main() {
 		}
 
 	default:
-		log.Fatalf("Invalid transport mode: %s", *transportMode)
+		log.Fatalf("Invalid transport mode: %s", cfg.TransportMode)
 	}
 
 	log.Println("Server shutdown complete")

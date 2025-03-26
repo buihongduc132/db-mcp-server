@@ -10,8 +10,7 @@ USER service-user
 
 WORKDIR /app
 
-RUN git clone https://github.com/FreePeak/db-mcp-server . && git checkout 9cbdd1912096d9c896d4733c611abaa95221e7d7
+# RUN git clone https://github.com/FreePeak/db-mcp-server . && git checkout 01bc85c8c93dbea90c1a2be729d7fd71b4d40f47
+COPY . .
 
-RUN 
-
-CMD ["mcp-proxy","/app/server","-t","stdio"]
+CMD ["mcp-proxy", "/app/server-linux", "-t", "stdio", "--stdio"]
