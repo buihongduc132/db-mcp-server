@@ -23,7 +23,6 @@ jobs:
     - name: Update go.mod
       run: |
         go mod edit -go=1.22
-        go mod edit -replace=github.com/mark3labs/mcp-go=./hack/mcp-go
         go mod tidy
 
     - name: Get dependencies
@@ -51,7 +50,6 @@ jobs:
     - name: Update go.mod
       run: |
         go mod edit -go=1.22
-        go mod edit -replace=github.com/mark3labs/mcp-go=./hack/mcp-go
         go mod tidy
 
     - name: Install golangci-lint
