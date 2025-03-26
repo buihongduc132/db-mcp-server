@@ -32,7 +32,7 @@ func (tr *ToolRegistry) RegisterAllTools() {
 	// If no database connections are available, register mock tools
 	if len(dbIDs) == 0 {
 		fmt.Println("No active database connections. Registering mock database tools.")
-		tr.registerMockTools()
+		tr.RegisterMockTools()
 		return
 	}
 
@@ -278,7 +278,7 @@ func (tr *ToolRegistry) registerCommonTools() {
 }
 
 // registerMockTools registers mock database tools when no real connections are available
-func (tr *ToolRegistry) registerMockTools() {
+func (tr *ToolRegistry) RegisterMockTools() {
 	// Register a mock query tool
 	tr.server.AddTool(
 		mcp.NewTool(

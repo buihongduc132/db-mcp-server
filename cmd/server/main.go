@@ -52,19 +52,36 @@ func main() {
 	dbUseCase := usecase.NewDatabaseUseCase(dbRepo)
 	toolRegistry := mcp.NewToolRegistry(mcpServer, dbUseCase)
 
+	// Debug log: Check database connections before registering tools
+	dbIDs := dbUseCase.ListDatabases()
+	log.Printf("Available database connections before registering tools: %v", dbIDs)
+
 	// Register tools
 	toolRegistry.RegisterAllTools()
+	log.Printf("Finished registering tools")
+
+	// If no database connections, register mock tools to ensure at least some tools are available
+	if len(dbIDs) == 0 {
+		log.Printf("No database connections available. Adding mock tools...")
+		toolRegistry.RegisterMockTools() // Add this method to ToolRegistry
+	}
 
 	// Handle transport mode
 	switch *transportMode {
 	case "sse":
 		log.Printf("Starting SSE server on port %d", *serverPort)
 
-		// Create SSE server
+		// Configure base URL with explicit protocol
+		baseURL := fmt.Sprintf("http://%s:%d", *serverHost, *serverPort)
+		log.Printf("Using base URL: %s", baseURL)
+
+		// Create SSE server with options
 		sseServer := server.NewSSEServer(
 			mcpServer,
-			server.WithBaseURL(fmt.Sprintf("http://%s:%d", *serverHost, *serverPort)),
+			server.WithBaseURL(baseURL),
 		)
+
+		log.Printf("Created SSE server, starting server...")
 
 		// Start the server
 		errCh := make(chan error, 1)
