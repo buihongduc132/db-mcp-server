@@ -98,6 +98,14 @@ func main() {
 		baseURL := fmt.Sprintf("http://%s:%d", *serverHost, cfg.ServerPort)
 		log.Printf("Using base URL: %s", baseURL)
 
+		// Set logging mode based on configuration
+		if cfg.DisableLogging {
+			log.Printf("Logging in SSE transport is disabled")
+			// Redirect standard output to null device if logging is disabled
+			// This only works on Unix-like systems
+			os.Setenv("MCP_DISABLE_LOGGING", "true")
+		}
+
 		// Create SSE server with options
 		sseServer := server.NewSSEServer(
 			mcpServer,
@@ -137,6 +145,14 @@ func main() {
 
 	case "stdio":
 		log.Printf("Starting STDIO server")
+
+		// Set logging mode based on configuration
+		if cfg.DisableLogging {
+			log.Printf("Logging in STDIO transport is disabled")
+			// Set environment variable to signal to the MCP library to disable logging
+			os.Setenv("MCP_DISABLE_LOGGING", "true")
+		}
+
 		// No graceful shutdown needed for stdio
 		if err := server.ServeStdio(mcpServer); err != nil {
 			log.Fatalf("STDIO server error: %v", err)

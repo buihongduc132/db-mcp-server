@@ -7,6 +7,7 @@ TRANSPORT="stdio"
 PORT=8080
 CONFIG=""
 CURSOR_MODE=0
+DISABLE_LOGGING=0
 LOG_FILE="logs/mcp-$(date +%Y%m%d-%H%M%S).log"
 
 # Create logs directory if it doesn't exist
@@ -20,6 +21,7 @@ usage() {
     echo "  -p <port>        Server port for sse mode (default: 8080)"
     echo "  -c <config>      Path to database configuration file"
     echo "  -cursor          Optimize for Cursor editor (automatically uses stdio)"
+    echo "  -no-log          Disable logging in transport (fixes JSON parsing errors)"
     echo "  -h               Display this help message"
     exit 1
 }
@@ -44,6 +46,10 @@ while [[ $# -gt 0 ]]; do
             CURSOR_MODE=1
             TRANSPORT="stdio"
             export CURSOR_EDITOR=1
+            shift
+            ;;
+        -no-log|--no-log)
+            DISABLE_LOGGING=1
             shift
             ;;
         -h|--help)
@@ -71,6 +77,12 @@ fi
 
 if [[ -n "$CONFIG" ]]; then
     ARGS="$ARGS -config $CONFIG"
+fi
+
+# Set disable logging environment variable if needed
+if [[ $DISABLE_LOGGING -eq 1 ]]; then
+    export DISABLE_LOGGING=true
+    echo "Transport logging is disabled" >&2
 fi
 
 # Log startup message

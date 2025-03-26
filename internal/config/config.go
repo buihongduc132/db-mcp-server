@@ -15,12 +15,13 @@ import (
 
 // Config holds all server configuration
 type Config struct {
-	ServerPort    int
-	TransportMode string
-	LogLevel      string
-	DBConfig      DatabaseConfig    // Legacy single database config
-	MultiDBConfig *db.MultiDBConfig // New multi-database config
-	ConfigPath    string            // Path to the configuration file
+	ServerPort     int
+	TransportMode  string
+	LogLevel       string
+	DBConfig       DatabaseConfig    // Legacy single database config
+	MultiDBConfig  *db.MultiDBConfig // New multi-database config
+	ConfigPath     string            // Path to the configuration file
+	DisableLogging bool              // When true, disables logging in stdio/SSE transport
 }
 
 // DatabaseConfig holds database configuration (legacy support)
@@ -62,11 +63,18 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	// Parse DISABLE_LOGGING env var
+	disableLogging := false
+	if v := getEnv("DISABLE_LOGGING", "false"); v == "true" || v == "1" {
+		disableLogging = true
+	}
+
 	config := &Config{
-		ServerPort:    port,
-		TransportMode: getEnv("TRANSPORT_MODE", "sse"),
-		LogLevel:      getEnv("LOG_LEVEL", "info"),
-		ConfigPath:    configPath,
+		ServerPort:     port,
+		TransportMode:  getEnv("TRANSPORT_MODE", "sse"),
+		LogLevel:       getEnv("LOG_LEVEL", "info"),
+		ConfigPath:     configPath,
+		DisableLogging: disableLogging,
 		DBConfig: DatabaseConfig{
 			Type:     getEnv("DB_TYPE", "mysql"),
 			Host:     getEnv("DB_HOST", "localhost"),

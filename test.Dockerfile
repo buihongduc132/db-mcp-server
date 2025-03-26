@@ -13,4 +13,9 @@ WORKDIR /app
 # RUN git clone https://github.com/FreePeak/db-mcp-server . && git checkout 01bc85c8c93dbea90c1a2be729d7fd71b4d40f47
 COPY . .
 
-CMD ["mcp-proxy", "/app/server-linux", "-t", "stdio", "--stdio"]
+# Add -no-log flag to prevent non-JSON log messages from causing parse errors in mcp-proxy
+# This fixes errors like: SyntaxError: Unexpected token 'N', "No active "... is not valid JSON
+# Redirect stderr to /dev/null to ensure no log messages interfere with JSON-RPC communication
+# CMD ["sh", "-c", "exec mcp-proxy /app/server-linux -t stdio -no-log --stdio 2>/dev/null"]
+
+CMD ["mcp-proxy", "/app/server-linux", "-t", "stdio", "-no-log", "--stdio"]

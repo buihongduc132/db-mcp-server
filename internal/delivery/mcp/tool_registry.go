@@ -31,7 +31,7 @@ func (tr *ToolRegistry) RegisterAllTools() {
 
 	// If no database connections are available, register mock tools
 	if len(dbIDs) == 0 {
-		fmt.Println("No active database connections. Registering mock database tools.")
+		// fmt.Println("No active database connections. Registering mock database tools.")
 		tr.RegisterMockTools()
 		return
 	}
