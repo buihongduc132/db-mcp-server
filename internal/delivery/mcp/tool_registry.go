@@ -277,7 +277,7 @@ func (tr *ToolRegistry) registerCommonTools() {
 	)
 }
 
-// registerMockTools registers mock database tools when no real connections are available
+// RegisterMockTools registers mock database tools when no real connections are available
 func (tr *ToolRegistry) RegisterMockTools() {
 	// Register a mock query tool
 	tr.server.AddTool(
