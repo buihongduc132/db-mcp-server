@@ -28,17 +28,6 @@ func main() {
 	serverHost := flag.String("h", "localhost", "Server host for SSE transport")
 	flag.Parse()
 
-	// Load configuration after environment variables are set
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Printf("Warning: Failed to load configuration: %v", err)
-		// Create a default config if loading fails
-		cfg = &config.Config{
-			ServerPort:    *serverPort,
-			TransportMode: *transportMode,
-			ConfigPath:    *configFile,
-		}
-	}
 	// Set environment variables from command line arguments if provided
 	if *configFile != "config.json" {
 		os.Setenv("CONFIG_PATH", *configFile)
@@ -50,7 +39,17 @@ func main() {
 		os.Setenv("SERVER_PORT", fmt.Sprintf("%d", *serverPort))
 	}
 
-	// Initialize database connection from config
+	// Load configuration after environment variables are set
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Printf("Warning: Failed to load configuration: %v", err)
+		// Create a default config if loading fails
+		cfg = &config.Config{
+			ServerPort:    *serverPort,
+			TransportMode: *transportMode,
+			ConfigPath:    *configFile,
+		}
+	} // Initialize database connection from config
 	dbConfig := &dbtools.Config{
 		ConfigFile: cfg.ConfigPath,
 	}
