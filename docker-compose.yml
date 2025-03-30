@@ -9,7 +9,7 @@ services:
       - SERVER_PORT=9092
       - TRANSPORT_MODE=sse
       - DB_CONFIG_FILE=/app/config.json
-      - MCP_TOOL_PREFIX=mcp_cashflow_db_mcp_server_sse
+      - MCP_TOOL_PREFIX=cortex_
     volumes:
       - ./config.json:/app/config.json
       - ./.env:/app/.env

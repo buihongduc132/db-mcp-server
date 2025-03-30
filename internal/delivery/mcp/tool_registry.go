@@ -47,9 +47,6 @@ func (tr *ToolRegistry) RegisterAllTools(ctx context.Context, useCase UseCasePro
 	// Register common tools
 	tr.registerCommonTools(ctx)
 
-	// Register Cursor-compatible tool aliases
-	tr.RegisterCursorCompatibleTools(ctx)
-
 	return nil
 }
 
@@ -93,32 +90,6 @@ func (tr *ToolRegistry) registerCommonTools(ctx context.Context) {
 	}
 }
 
-// RegisterCursorCompatibleTools registers aliases for all tools with Cursor-compatible naming
-func (tr *ToolRegistry) RegisterCursorCompatibleTools(ctx context.Context) {
-	prefix := getToolNamePrefix()
-
-	// Get all registered databases
-	databases := tr.databaseUseCase.ListDatabases()
-
-	// For each database and tool type, create a cursor-compatible alias
-	for _, dbID := range databases {
-		for _, toolType := range []string{"query", "execute", "transaction", "performance", "explain", "schema"} {
-			sourceName := fmt.Sprintf("%s_%s", dbID, toolType)
-			targetName := fmt.Sprintf("%s_%s_%s", prefix, dbID, toolType)
-
-			// Register the alias tool
-			tr.createToolAlias(ctx, toolType, sourceName, targetName)
-		}
-	}
-
-	// Don't forget the list_databases tool
-	listDbSource := "list_databases"
-	listDbTarget := fmt.Sprintf("%s_list_databases", prefix)
-	tr.createToolAlias(ctx, "list_databases", listDbSource, listDbTarget)
-
-	log.Printf("Registered cursor-compatible aliases with prefix '%s' for all tools", prefix)
-}
-
 // createToolAlias creates an alias for an existing tool
 func (tr *ToolRegistry) createToolAlias(ctx context.Context, toolTypeName string, existingName string, aliasName string) error {
 	log.Printf("Creating alias '%s' for tool '%s' of type '%s'", aliasName, existingName, toolTypeName)
@@ -143,7 +114,7 @@ func (tr *ToolRegistry) createToolAlias(ctx context.Context, toolTypeName string
 // getToolNamePrefix returns the prefix to use for Cursor-compatible tool names
 func getToolNamePrefix() string {
 	// Default prefix (same as in previous versions)
-	defaultPrefix := "mcp_cashflow_db_mcp_server_sse"
+	defaultPrefix := "cortex_"
 
 	// Check if a custom prefix is defined in environment variable
 	customPrefix := os.Getenv("MCP_TOOL_PREFIX")

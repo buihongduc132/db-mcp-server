@@ -328,6 +328,48 @@ go get github.com/FreePeak/cortex@v1.0.1
 go mod tidy
 ```
 
+## Updates
+
+### Version 1.5.0 - Updated to use FreePeak/cortex
+
+This project has been updated to use the official [FreePeak/cortex](https://github.com/FreePeak/cortex) package for implementing MCP (Model Context Protocol) servers. This update brings several benefits:
+
+- Improved API consistency with the official cortex implementation
+- Better error handling and logging 
+- Enhanced tool management
+- More robust protocol support
+
+### Installation
+
+The project requires Go 1.21 or newer. Use the following command to build:
+
+```bash
+go build -o db-mcp-server ./cmd/server
+```
+
+Run with either `stdio` or `sse` transport mode:
+
+```bash
+# Run with SSE (Server-Sent Events) for web clients
+./db-mcp-server -t sse -p 9092
+
+# Run with STDIO for command-line integration
+./db-mcp-server -t stdio
+```
+
+### Available Tools
+
+The server provides the following database tools for each connected database:
+
+- `query_<dbname>` - Execute SQL queries on the specified database
+- `execute_<dbname>` - Execute SQL statements (INSERT, UPDATE, DELETE, etc.)
+- `transaction_<dbname>` - Manage transactions
+- `performance_<dbname>` - Analyze query performance
+- `schema_<dbname>` - Get database schema
+
+Common tools:
+- `list_databases` - List all available databases
+
 # Database MCP Server
 
 This server provides database tools for Cursor via the MCP (MultiLLM Communication Protocol).
@@ -495,3 +537,59 @@ The following tools are available for use in Cursor:
 1. Check the logs in the `logs` directory
 2. Run the test script: `./test-tools.sh`
 3. Stop all servers and restart using the provided scripts
+
+## Using with Language Models
+
+The Database MCP Server implements the [Model Context Protocol (MCP)](https://github.com/FreePeak/cortex), which allows language models to interact with databases in a secure and controlled manner. To connect your LLM to this server, follow these steps:
+
+### For Server-Sent Events (SSE) Mode
+
+1. Start the server in SSE mode:
+   ```bash
+   ./db-mcp-server -t sse -p 9092
+   ```
+
+2. Connect your LLM client to the server using the SSE endpoint:
+   ```
+   http://localhost:9092/sse
+   ```
+
+3. Use the session ID returned by the server to send messages:
+   ```
+   http://localhost:9092/message?sessionId=<session-id>
+   ```
+
+### For STDIO Mode
+
+1. Start the server in STDIO mode:
+   ```bash
+   ./db-mcp-server -t stdio
+   ```
+
+2. The server will read JSON-RPC messages from stdin and write responses to stdout.
+
+3. Example message to list databases:
+   ```json
+   {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_databases"}}
+   ```
+
+4. Example message to execute a query:
+   ```json
+   {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"query_postgres1","parameters":{"query":"SELECT * FROM users LIMIT 5"}}}
+   ```
+
+### Cursor Integration
+
+To use the Database MCP Server with Cursor, add this to your `.cursor/mcp.json` file:
+
+```json
+{
+    "mcpServers": {
+        "db-mcp-server-sse": {
+            "url": "http://127.0.0.1:9092/sse"
+        }
+    }
+}
+```
+
+Then Cursor will automatically connect to the server and make the database tools available to the language model.

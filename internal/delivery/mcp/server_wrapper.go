@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/FreePeak/cortex/pkg/server"
+	"github.com/FreePeak/cortex/pkg/types"
 )
 
 // ServerWrapper provides a wrapper around server.MCPServer to handle type assertions
@@ -19,15 +20,18 @@ func NewServerWrapper(mcpServer *server.MCPServer) *ServerWrapper {
 	}
 }
 
-// AddTool adds a tool to the server, handling any necessary type assertions
-// NOTE: This is a mock implementation to resolve compilation issues
-// In a real implementation, this would handle type assertions and delegate to the actual server
-// TECHNICAL DEBT: This method needs to be reimplemented when the server.Tool type is better understood
+// AddTool adds a tool to the server
 func (sw *ServerWrapper) AddTool(ctx context.Context, tool interface{}, handler func(ctx context.Context, request server.ToolCallRequest) (interface{}, error)) error {
 	// Log the operation for debugging
-	log.Printf("Mock AddTool called: %T", tool)
+	log.Printf("Adding tool: %T", tool)
 
-	// In a real implementation, this would call sw.mcpServer.AddTool with proper type conversion
-	// For now, we'll assume success and return nil to avoid compilation errors
-	return nil
+	// Cast the tool to the expected type (*types.Tool)
+	typedTool, ok := tool.(*types.Tool)
+	if !ok {
+		log.Printf("Warning: Tool is not of type *types.Tool: %T", tool)
+		return nil
+	}
+
+	// Pass the tool to the MCPServer's AddTool method
+	return sw.mcpServer.AddTool(ctx, typedTool, handler)
 }

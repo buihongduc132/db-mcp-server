@@ -80,10 +80,14 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
+	// Create logger for the MCP server
+	logger := log.New(os.Stderr, "[DB MCP Server] ", log.LstdFlags)
+
 	// Create mcp-go server
 	mcpServer := server.NewMCPServer(
 		"DB MCP Server", // Server name
 		"1.0.0",         // Server version
+		logger,          // Logger
 	)
 
 	// Set up Clean Architecture layers
