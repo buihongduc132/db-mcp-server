@@ -1,6 +1,16 @@
 version: '3'
 
 services:
+  db-mcp-server:
+    image: freepeak/db-mcp-server:latest
+    ports:
+      - "9092:9092"
+    volumes:
+      - ./config.json:/app/config.json
+    command: ["-t", "sse", "-c", "/app/config.json"]
+    depends_on:
+      - mysql1
+      - mysql2
 
   mysql1:
     image: mysql:8.0

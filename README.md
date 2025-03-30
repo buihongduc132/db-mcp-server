@@ -9,15 +9,79 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/FreePeak/db-mcp-server.svg)](https://pkg.go.dev/github.com/FreePeak/db-mcp-server)
 [![Contributors](https://img.shields.io/github/contributors/FreePeak/db-mcp-server)](https://github.com/FreePeak/db-mcp-server/graphs/contributors)
 
-<h3>A robust multi-database implementation of the Database Model Context Protocol (DB MCP)</h3>
+<h3>A powerful multi-database server implementing the Model Context Protocol (MCP) to provide AI assistants with structured access to databases.</h3>
 
+<div class="toc">
+  <a href="#what-is-db-mcp-server">Overview</a> •
+  <a href="#core-concepts">Core Concepts</a> •
+  <a href="#features">Features</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#running-the-server">Running</a> •
+  <a href="#configuration">Configuration</a> •
+  <a href="#available-tools">Tools</a> •
+  <a href="#examples">Examples</a> •
+  <a href="#troubleshooting">Troubleshooting</a> •
+  <a href="#contributing">Contributing</a>
+</div>
 
 </div>
-A Clean Architecture implementation of a database server for [Model Context Protocol (MCP)](https://github.com/microsoft/mcp), providing AI assistants with structured access to multiple databases simultaneously.
 
-## Overview
+## What is DB MCP Server?
 
-The DB MCP Server provides a standardized way for AI models to interact with databases, enabling them to execute SQL queries, manage transactions, explore schemas, and analyze performance across different database systems at the same time. Built on [FreePeak/cortex](https://github.com/FreePeak/cortex) framework, it follows Clean Architecture principles for maintainability and testability.
+The DB MCP Server provides a standardized way for AI models to interact with multiple databases simultaneously. Built on the [FreePeak/cortex](https://github.com/FreePeak/cortex) framework, it enables AI assistants to execute SQL queries, manage transactions, explore schemas, and analyze performance across different database systems through a unified interface.
+
+## Core Concepts
+
+### Multi-Database Support
+
+Unlike traditional database connectors, DB MCP Server can connect to and interact with multiple databases concurrently:
+
+```json
+{
+  "connections": [
+    {
+      "id": "mysql1",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 3306,
+      "name": "db1",
+      "user": "user1",
+      "password": "password1"
+    },
+    {
+      "id": "postgres1",
+      "type": "postgres",
+      "host": "localhost",
+      "port": 5432,
+      "name": "db2",
+      "user": "user2",
+      "password": "password2"
+    }
+  ]
+}
+```
+
+### Dynamic Tool Generation
+
+For each connected database, the server automatically generates a set of specialized tools:
+
+```go
+// For a database with ID "mysql1", these tools are generated:
+query_mysql1       // Execute SQL queries
+execute_mysql1     // Run data modification statements
+transaction_mysql1 // Manage transactions
+schema_mysql1      // Explore database schema
+performance_mysql1 // Analyze query performance
+```
+
+### Clean Architecture
+
+The server follows Clean Architecture principles with these layers:
+
+1. **Domain Layer**: Core business entities and interfaces
+2. **Repository Layer**: Data access implementations
+3. **Use Case Layer**: Application business logic
+4. **Delivery Layer**: External interfaces (MCP tools)
 
 ## Features
 
@@ -35,47 +99,26 @@ The DB MCP Server provides a standardized way for AI models to interact with dat
 
 ## Currently Supported Databases
 
-The DB MCP Server currently provides first-class support for:
-
 | Database | Status | Features |
 |----------|--------|----------|
 | MySQL    | ✅ Full Support | Queries, Transactions, Schema Analysis, Performance Insights |
 | PostgreSQL | ✅ Full Support | Queries, Transactions, Schema Analysis, Performance Insights |
 
-## Roadmap
+## Quick Start
 
-We're committed to expanding DB MCP Server to support a wide range of database systems. Here's our planned development roadmap:
+### Using Docker
 
-### Q3 2025
-- **MongoDB** - Support for document-oriented database operations, schema exploration, and query optimization
-- **SQLite** - Lightweight embedded database integration with full transaction support
-- **MariaDB** - Complete feature parity with MySQL implementation
+The quickest way to get started is with Docker:
 
-### Q4 2025
-- **Microsoft SQL Server** - Enterprise database support with specialized T-SQL capabilities
-- **Oracle Database** - Enterprise-grade integration with Oracle-specific optimizations
-- **Redis** - Key-value store operations and performance analysis
+```bash
+# Pull the latest image
+docker pull freepeak/db-mcp-server:latest
 
-### 2026
-- **Cassandra** - Distributed NoSQL database support for high-scale operations
-- **Elasticsearch** - Specialized search and analytics capabilities
-- **CockroachDB** - Distributed SQL database for global-scale applications
-- **DynamoDB** - AWS-native NoSQL database integration
-- **Neo4j** - Graph database support with specialized query capabilities
-- **ClickHouse** - Analytics database support with column-oriented optimizations
+# Run with your config mounted
+docker run -p 9092:9092 -v $(pwd)/config.json:/app/config.json freepeak/db-mcp-server -t sse -c /app/config.json
+```
 
-Our goal is to provide a unified interface for AI assistants to work with any database while maintaining the specific features and optimizations of each database system.
-
-## Installation
-
-### Prerequisites
-
-- Go 1.18 or later
-- Supported databases:
-  - MySQL
-  - PostgreSQL
-
-### Quick Start
+### From Source
 
 ```bash
 # Clone the repository
@@ -84,11 +127,100 @@ cd db-mcp-server
 
 # Build the server
 make build
+
+# Run the server in SSE mode
+./server -t sse -c config.json
+```
+
+## Running the Server
+
+The server supports multiple transport modes to fit different use cases:
+
+### STDIO Mode (for IDE integration)
+
+Ideal for integration with AI coding assistants:
+
+```bash
+# Run the server in STDIO mode
+./server -t stdio -c config.json
+```
+
+Output will be sent as JSON-RPC messages to stdout, while logs go to stderr.
+
+For Cursor integration, add this to your `.cursor/mcp.json`:
+
+```json
+{
+    "mcpServers": {
+        "stdio-db-mcp-server": {
+            "command": "/path/to/db-mcp-server/server",
+            "args": [
+                "-t", "stdio",
+                "-c", "/path/to/config.json"
+            ]
+        }
+    }
+}
+```
+
+### SSE Mode (Server-Sent Events)
+
+For web-based applications and services:
+
+```bash
+# Run with default host (localhost) and port (9092)
+./server -t sse -c config.json
+
+# Specify a custom host and port
+./server -t sse -host 0.0.0.0 -port 8080 -c config.json
+```
+
+Connect your client to `http://localhost:9092/sse` for the event stream.
+
+### Docker Compose
+
+For development environments with database containers:
+
+```yaml
+# docker-compose.yml
+version: '3'
+services:
+  db-mcp-server:
+    image: freepeak/db-mcp-server:latest
+    ports:
+      - "9092:9092"
+    volumes:
+      - ./config.json:/app/config.json
+    command: ["-t", "sse", "-c", "/app/config.json"]
+    depends_on:
+      - mysql
+      - postgres
+  
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3306:3306"
+  
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
 ```
 
 ## Configuration
 
-The key advantage of DB MCP Server is the ability to connect to multiple databases simultaneously. Configure your database connections in a `config.json` file:
+### Database Configuration
+
+Create a `config.json` file with your database connections:
 
 ```json
 {
@@ -97,25 +229,16 @@ The key advantage of DB MCP Server is the ability to connect to multiple databas
       "id": "mysql1",
       "type": "mysql",
       "host": "localhost",
-      "port": 13306,
+      "port": 3306,
       "name": "db1",
       "user": "user1",
       "password": "password1"
     },
     {
-      "id": "mysql2",
-      "type": "mysql",
-      "host": "localhost",
-      "port": 13307,
-      "name": "db3",
-      "user": "user3",
-      "password": "password3"
-    },
-    {
       "id": "postgres1",
       "type": "postgres",
       "host": "localhost",
-      "port": 15432,
+      "port": 5432,
       "name": "db2",
       "user": "user2",
       "password": "password2"
@@ -124,170 +247,191 @@ The key advantage of DB MCP Server is the ability to connect to multiple databas
 }
 ```
 
-Each database connection has a unique ID that is used to reference it when using database tools.
+### Command-Line Options
 
-## Dynamic Database Tools
-
-The DB MCP Server can dynamically generate database tools based on your database configuration. Instead of hardcoding tool names, the server will create tools with appropriate names based on the databases defined in your configuration.
-
-### How It Works
-
-1. The server reads database connections from:
-   - Configuration file specified with `-c` or `-config` flags
-   - Direct JSON configuration via `-db-config` flag
-   - Environment variable `DB_CONFIG`
-   - Individual environment variables (`DB_HOST`, `DB_PORT`, etc.)
-
-2. For each database connection, the server automatically generates the following tools:
-   - `query_<dbID>` - Execute SQL queries
-   - `execute_<dbID>` - Execute SQL statements (INSERT, UPDATE, DELETE)
-   - `transaction_<dbID>` - Manage database transactions
-   - `performance_<dbID>` - Analyze query performance
-   - `schema_<dbID>` - Get database schema information
-
-3. Cursor-compatible aliases are also generated with the format:
-   - `mcp_cashflow_db_mcp_server_sse_query_<dbID>`
-   - `mcp_cashflow_db_mcp_server_sse_execute_<dbID>`
-   - And so on...
-
-### Configuration Example
-
-Define multiple databases in `config.json`:
-
-```json
-{
-  "connections": [
-    {
-      "id": "db1",
-      "type": "mysql",
-      "host": "localhost",
-      "port": 3306,
-      "name": "database1",
-      "user": "user1",
-      "password": "password1"
-    },
-    {
-      "id": "db2",
-      "type": "mysql",
-      "host": "localhost",
-      "port": 3307,
-      "name": "database2",
-      "user": "user2",
-      "password": "password2"
-    }
-  ]
-}
-```
-
-With this configuration, the server will automatically generate tools like:
-- `query_db1`, `execute_db1`, `transaction_db1`, etc.
-- `query_db2`, `execute_db2`, `transaction_db2`, etc.
-
-### Command-Line Configuration
-
-You can also provide database configuration directly via command line:
+The server supports various command-line options:
 
 ```bash
-./db-mcp-server -db-config '{"connections":[{"id":"mydb","type":"mysql","host":"localhost","port":3306,"name":"mydb","user":"root","password":"password"}]}'
-```
+# Basic options
+./server -t <transport> -c <config-file>
 
-This will generate tools like `query_mydb`, `execute_mydb`, etc.
+# Available transports: stdio, sse
+# For SSE transport, additional options:
+./server -t sse -host <hostname> -port <port> -c <config-file>
 
-## Usage
+# Direct database configuration:
+./server -t stdio -db-config '{"connections":[...]}'
 
-The server supports two transport modes:
-
-### SSE Mode (Server-Sent Events)
-
-```bash
-# Run with default host (localhost) and port (9092)
-./server -t sse -config config.json
-
-# Specify host and port for external access
-./server -t sse -host example.com -port 8080 -config config.json
-```
-
-### STDIO Mode (for IDE integration)
-
-```bash
-# Run in STDIO mode (e.g., for Cursor integration)
-<path-to-db-mcp-server>/server -t stdio -c <path-to-your-db-config>config.json
-```
-
-#### Example config for Cursor
-
-```json
-{
-    "mcpServers": {
-        "stdio-db-mcp-server": {
-            "command": "<path-to-dir>/db-mcp-server/server",
-            "args": [
-                "-t",
-                "stdio",
-                "-c",
-                "<your-dir>/database_config.json"
-            ]
-        }
-    }
-}
-```
-
-For Cursor integration, you can use the provided scripts:
-
-```bash
-# Start the server in Cursor
-./cursor-mcp.sh config.json
+# Environment variable configuration:
+export DB_CONFIG='{"connections":[...]}'
+./server -t stdio
 ```
 
 ## Available Tools
 
-For each connected database, the server dynamically creates a set of database-specific tools. For example, if you have databases with IDs "mysql1", "mysql2", and "postgres1", the following tools will be available:
+For each connected database (e.g., "mysql1", "mysql2"), the server creates:
 
-### Query Tools
-- `query_mysql1` - Execute SQL queries on mysql1 database
-- `query_mysql2` - Execute SQL queries on mysql2 database  
-- `query_postgres1` - Execute SQL queries on postgres1 database
+### Database-Specific Tools
 
-### Execute Tools
-- `execute_mysql1` - Run data modification statements on mysql1
-- `execute_mysql2` - Run data modification statements on mysql2
-- `execute_postgres1` - Run data modification statements on postgres1
+- `query_<dbid>`: Execute SQL queries on the specified database
+  ```json
+  {
+    "query": "SELECT * FROM users WHERE age > ?",
+    "params": [30]
+  }
+  ```
 
-### Transaction Tools
-- `transaction_mysql1` - Manage transactions on mysql1
-- `transaction_mysql2` - Manage transactions on mysql2
-- `transaction_postgres1` - Manage transactions on postgres1
+- `execute_<dbid>`: Execute SQL statements (INSERT, UPDATE, DELETE)
+  ```json
+  {
+    "statement": "INSERT INTO users (name, email) VALUES (?, ?)",
+    "params": ["John Doe", "john@example.com"]
+  }
+  ```
 
-### Performance Tools
-- `performance_mysql1` - Analyze query performance on mysql1
-- `performance_mysql2` - Analyze query performance on mysql2
-- `performance_postgres1` - Analyze query performance on postgres1
+- `transaction_<dbid>`: Manage database transactions
+  ```json
+  // Begin transaction
+  {
+    "action": "begin",
+    "readOnly": false
+  }
+  
+  // Execute within transaction
+  {
+    "action": "execute",
+    "transactionId": "<from begin response>",
+    "statement": "UPDATE users SET active = ? WHERE id = ?",
+    "params": [true, 42]
+  }
+  
+  // Commit transaction
+  {
+    "action": "commit",
+    "transactionId": "<from begin response>"
+  }
+  ```
 
-### Schema Tools
-- `schema_mysql1` - Explore database schema on mysql1
-- `schema_mysql2` - Explore database schema on mysql2
-- `schema_postgres1` - Explore database schema on postgres1
+- `schema_<dbid>`: Get database schema information
+  ```json
+  {
+    "random_string": "dummy"
+  }
+  ```
+
+- `performance_<dbid>`: Analyze query performance
+  ```json
+  {
+    "action": "analyzeQuery",
+    "query": "SELECT * FROM users WHERE name LIKE ?"
+  }
+  ```
 
 ### Global Tools
-- `list_databases` - Show all available database connections
 
-This architecture enables AI assistants to work with multiple databases simultaneously while maintaining separation between them.
+- `list_databases`: List all configured database connections
+  ```json
+  {}
+  ```
 
-## Architecture
+## Examples
 
-The server follows Clean Architecture principles with these layers:
+### Querying Multiple Databases
 
-1. **Domain Layer**: Core business entities and interfaces
-2. **Repository Layer**: Data access implementations
-3. **Use Case Layer**: Application business logic
-4. **Delivery Layer**: External interfaces (MCP tools)
+```json
+// Query the first database
+{
+  "name": "query_mysql1",
+  "parameters": {
+    "query": "SELECT * FROM users LIMIT 5"
+  }
+}
 
-## License
+// Query the second database
+{
+  "name": "query_mysql2",
+  "parameters": {
+    "query": "SELECT * FROM products LIMIT 5"
+  }
+}
+```
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+### Executing Transactions
 
+```json
+// Begin transaction
+{
+  "name": "transaction_mysql1",
+  "parameters": {
+    "action": "begin"
+  }
+}
+// Response contains transactionId
 
-## 🤝 Contributing
+// Execute within transaction
+{
+  "name": "transaction_mysql1",
+  "parameters": {
+    "action": "execute",
+    "transactionId": "tx_12345",
+    "statement": "INSERT INTO orders (user_id, product_id) VALUES (?, ?)",
+    "params": [1, 2]
+  }
+}
+
+// Commit transaction
+{
+  "name": "transaction_mysql1",
+  "parameters": {
+    "action": "commit",
+    "transactionId": "tx_12345"
+  }
+}
+```
+
+## Roadmap
+
+We're committed to expanding DB MCP Server to support a wide range of database systems:
+
+### Q3 2025
+- **MongoDB** - Support for document-oriented database operations
+- **SQLite** - Lightweight embedded database integration
+- **MariaDB** - Complete feature parity with MySQL implementation
+
+### Q4 2025
+- **Microsoft SQL Server** - Enterprise database support with T-SQL capabilities
+- **Oracle Database** - Enterprise-grade integration
+- **Redis** - Key-value store operations
+
+### 2026
+- **Cassandra** - Distributed NoSQL database support
+- **Elasticsearch** - Specialized search and analytics capabilities
+- **CockroachDB** - Distributed SQL database for global-scale applications
+- **DynamoDB** - AWS-native NoSQL database integration
+- **Neo4j** - Graph database support
+- **ClickHouse** - Analytics database support
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Connection Errors**: Verify your database connection settings in `config.json`
+2. **Tool Not Found**: Ensure the server is running and check tool name prefixes
+3. **Failed Queries**: Check your SQL syntax and database permissions
+
+### Logs
+
+The server writes logs to:
+- STDIO mode: stderr
+- SSE mode: stdout and `./logs/db-mcp-server.log`
+
+Enable debug logging with the `-debug` flag:
+
+```bash
+./server -t sse -debug -c config.json
+```
+
+## Contributing
 
 Contributions are welcome! Here's how you can help:
 
@@ -297,13 +441,13 @@ Contributions are welcome! Here's how you can help:
 4. **Push** to the branch: `git push origin new-feature`
 5. **Submit** a pull request
 
-Please make sure your code follows our coding standards and includes appropriate tests.
+Please ensure your code follows our coding standards and includes appropriate tests.
 
-## 📝 License
+## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 📧 Support & Contact
+## Support & Contact
 
 - For questions or issues, email [mnhatlinh.doan@gmail.com](mailto:mnhatlinh.doan@gmail.com)
 - Open an issue directly: [Issue Tracker](https://github.com/FreePeak/db-mcp-server/issues)
@@ -315,281 +459,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 alt="Buy Me A Coffee"/>
 </a>
 </p>
-
-## Development Notes
-
-### Dependencies
-
-This project has a dependency on `github.com/FreePeak/cortex` which can be installed using the standard Go module system:
-
-```bash
-# Ensure the dependency is installed
-go get github.com/FreePeak/cortex@v1.0.1
-go mod tidy
-```
-
-## Updates
-
-### Version 1.5.0 - Updated to use FreePeak/cortex
-
-This project has been updated to use the official [FreePeak/cortex](https://github.com/FreePeak/cortex) package for implementing MCP (Model Context Protocol) servers. This update brings several benefits:
-
-- Improved API consistency with the official cortex implementation
-- Better error handling and logging 
-- Enhanced tool management
-- More robust protocol support
-
-### Installation
-
-The project requires Go 1.21 or newer. Use the following command to build:
-
-```bash
-go build -o db-mcp-server ./cmd/server
-```
-
-Run with either `stdio` or `sse` transport mode:
-
-```bash
-# Run with SSE (Server-Sent Events) for web clients
-./db-mcp-server -t sse -p 9092
-
-# Run with STDIO for command-line integration
-./db-mcp-server -t stdio
-```
-
-### Available Tools
-
-The server provides the following database tools for each connected database:
-
-- `query_<dbname>` - Execute SQL queries on the specified database
-- `execute_<dbname>` - Execute SQL statements (INSERT, UPDATE, DELETE, etc.)
-- `transaction_<dbname>` - Manage transactions
-- `performance_<dbname>` - Analyze query performance
-- `schema_<dbname>` - Get database schema
-
-Common tools:
-- `list_databases` - List all available databases
-
-# Database MCP Server
-
-This server provides database tools for Cursor via the MCP (MultiLLM Communication Protocol).
-
-## Features
-
-- Execute SQL queries across multiple databases
-- Execute statements (INSERT, UPDATE, DELETE)
-- Manage transactions
-- Analyze query performance
-- Explore database schema
-- List available databases
-
-## Setup
-
-1. Build the server:
-   ```
-   make build
-   ```
-
-2. Configure your database connections in `config.json`:
-   ```json
-   {
-     "connections": [
-       {
-         "id": "mysql1",
-         "type": "mysql",
-         "host": "localhost",
-         "port": 3306,
-         "name": "db1",
-         "user": "user",
-         "password": "password"
-       },
-       {
-         "id": "mysql2",
-         "type": "mysql",
-         "host": "localhost",
-         "port": 3307,
-         "name": "db3",
-         "user": "user",
-         "password": "password"
-       }
-     ]
-   }
-   ```
-
-3. Start the server:
-   ```
-   ./restart-mcp.sh
-   ```
-
-4. Start the Cursor compatibility server (if needed):
-   ```
-   ./run-cursor-compat.sh
-   ```
-
-5. Test the tools:
-   ```
-   ./test-tools.sh
-   ```
-
-## Architecture
-
-The server follows Clean Architecture principles:
-
-- **cmd/server/main.go**: Entry point and HTTP handlers
-- **internal/delivery/mcp**: Tool registration and handlers
-- **internal/usecase**: Business logic
-- **internal/repository**: Data access
-- **pkg/dbtools**: Database utilities
-
-## Tools Available in Cursor
-
-The following tools are available for use in Cursor:
-
-- `mcp_cashflow_db_mcp_server_sse_list_databases`: List all available databases
-- `mcp_cashflow_db_mcp_server_sse_query_mysql1`: Execute SQL query on mysql1 database
-- `mcp_cashflow_db_mcp_server_sse_query_mysql2`: Execute SQL query on mysql2 database
-- `mcp_cashflow_db_mcp_server_sse_execute_mysql1`: Execute SQL statement on mysql1 database
-- `mcp_cashflow_db_mcp_server_sse_execute_mysql2`: Execute SQL statement on mysql2 database
-- `mcp_cashflow_db_mcp_server_sse_schema_mysql1`: Get schema of mysql1 database
-- `mcp_cashflow_db_mcp_server_sse_schema_mysql2`: Get schema of mysql2 database
-- `mcp_cashflow_db_mcp_server_sse_transaction_mysql1`: Manage transactions on mysql1 database
-- `mcp_cashflow_db_mcp_server_sse_transaction_mysql2`: Manage transactions on mysql2 database
-- `mcp_cashflow_db_mcp_server_sse_performance_mysql1`: Analyze query performance on mysql1 database
-- `mcp_cashflow_db_mcp_server_sse_performance_mysql2`: Analyze query performance on mysql2 database
-
-## Using with Cursor
-
-### List Databases
-```json
-{
-  "random_string": "dummy"
-}
-```
-
-### Query Database
-```json
-{
-  "query": "SELECT * FROM users LIMIT 10",
-  "params": ["param1", "param2"]
-}
-```
-
-### Execute Statement
-```json
-{
-  "statement": "INSERT INTO users (name, email) VALUES (?, ?)",
-  "params": ["John Doe", "john@example.com"]
-}
-```
-
-### Get Schema
-```json
-{
-  "random_string": "dummy"
-}
-```
-
-### Transaction Management
-```json
-// Begin transaction
-{
-  "action": "begin",
-  "readOnly": false
-}
-
-// Execute in transaction
-{
-  "action": "execute",
-  "transactionId": "tx_id_from_begin",
-  "statement": "INSERT INTO users (name) VALUES (?)",
-  "params": ["Alice"]
-}
-
-// Commit transaction
-{
-  "action": "commit",
-  "transactionId": "tx_id_from_begin"
-}
-
-// Rollback transaction
-{
-  "action": "rollback",
-  "transactionId": "tx_id_from_begin"
-}
-```
-
-### Performance Analysis
-```json
-{
-  "action": "getSlowQueries",
-  "limit": 10
-}
-```
-
-## Common Issues
-
-1. **Invalid session ID**: Make sure the Cursor compatibility server is running on port 9093.
-2. **Unknown tool**: Check the tool name prefix and ensure the server is running.
-3. **Connection errors**: Verify your database connection settings in config.json.
-
-## Troubleshooting
-
-1. Check the logs in the `logs` directory
-2. Run the test script: `./test-tools.sh`
-3. Stop all servers and restart using the provided scripts
-
-## Using with Language Models
-
-The Database MCP Server implements the [Model Context Protocol (MCP)](https://github.com/FreePeak/cortex), which allows language models to interact with databases in a secure and controlled manner. To connect your LLM to this server, follow these steps:
-
-### For Server-Sent Events (SSE) Mode
-
-1. Start the server in SSE mode:
-   ```bash
-   ./db-mcp-server -t sse -p 9092
-   ```
-
-2. Connect your LLM client to the server using the SSE endpoint:
-   ```
-   http://localhost:9092/sse
-   ```
-
-3. Use the session ID returned by the server to send messages:
-   ```
-   http://localhost:9092/message?sessionId=<session-id>
-   ```
-
-### For STDIO Mode
-
-1. Start the server in STDIO mode:
-   ```bash
-   ./db-mcp-server -t stdio
-   ```
-
-2. The server will read JSON-RPC messages from stdin and write responses to stdout.
-
-3. Example message to list databases:
-   ```json
-   {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_databases"}}
-   ```
-
-4. Example message to execute a query:
-   ```json
-   {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"query_postgres1","parameters":{"query":"SELECT * FROM users LIMIT 5"}}}
-   ```
-
-### Cursor Integration
-
-To use the Database MCP Server with Cursor, add this to your `.cursor/mcp.json` file:
-
-```json
-{
-    "mcpServers": {
-        "db-mcp-server-sse": {
-            "url": "http://127.0.0.1:9092/sse"
-        }
-    }
-}
-```
-
-Then Cursor will automatically connect to the server and make the database tools available to the language model.

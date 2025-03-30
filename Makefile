@@ -1,4 +1,4 @@
-.PHONY: build run-stdio run-sse clean test client client-simple test-script build-example
+.PHONY: build run-stdio run-sse clean test client client-simple test-script build-example docker-build docker-run docker-run-stdio docker-stop
 
 # Build the server
 build:
@@ -48,6 +48,23 @@ lint:
 setup:
 	go mod tidy
 	go mod download
+
+# Docker targets
+docker-build:
+	docker build -t db-mcp-server:latest .
+
+# Run the Docker container in SSE mode
+docker-run:
+	docker run -d --name db-mcp-server -p 9092:9092 -v $(PWD)/config.json:/app/config.json -v $(PWD)/logs:/app/logs db-mcp-server:latest
+
+# Run Docker container in STDIO mode (for debugging)
+docker-run-stdio:
+	docker run -it --rm --name db-mcp-server-stdio -v $(PWD)/config.json:/app/config.json -e TRANSPORT_MODE=stdio db-mcp-server:latest
+
+# Stop and remove the Docker container
+docker-stop:
+	docker stop db-mcp-server || true
+	docker rm db-mcp-server || true
 
 # Default target
 all: build 
