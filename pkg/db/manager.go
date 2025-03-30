@@ -64,6 +64,10 @@ func (m *Manager) Connect() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	var connectErrors []error
+	totalConfigs := len(m.configs)
+	successfulConnections := 0
+
 	for id, cfg := range m.configs {
 		dbConfig := Config{
 			Type:     cfg.Type,
@@ -77,14 +81,34 @@ func (m *Manager) Connect() error {
 		// Create and connect to database
 		db, err := NewDatabase(dbConfig)
 		if err != nil {
-			return fmt.Errorf("failed to create database instance for %s: %w", id, err)
+			errMsg := fmt.Errorf("failed to create database instance for %s: %w", id, err)
+			connectErrors = append(connectErrors, errMsg)
+			fmt.Printf("Error: %v\n", errMsg)
+			continue
 		}
 
 		if err := db.Connect(); err != nil {
-			return fmt.Errorf("failed to connect to database %s: %w, %#v", id, err, dbConfig)
+			errMsg := fmt.Errorf("failed to connect to database %s: %w", id, err)
+			connectErrors = append(connectErrors, errMsg)
+			fmt.Printf("Error: %v\n", errMsg)
+			continue
 		}
 
+		// Store successful connection
 		m.connections[id] = db
+		successfulConnections++
+	}
+
+	// Report connection status
+	if successfulConnections == 0 && len(connectErrors) > 0 {
+		return fmt.Errorf("failed to connect to any database: %v", connectErrors)
+	}
+
+	if len(connectErrors) > 0 {
+		fmt.Printf("Warning: Connected to %d/%d databases. %d failed: %v\n",
+			successfulConnections, totalConfigs, len(connectErrors), connectErrors)
+	} else {
+		fmt.Printf("Successfully connected to all %d databases\n", successfulConnections)
 	}
 
 	return nil

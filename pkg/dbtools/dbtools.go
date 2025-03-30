@@ -84,6 +84,11 @@ func InitDatabase(cfg *Config) error {
 				// Don't return error, try other methods
 			} else {
 				log.Printf("Loaded database config from file: %s", cfg.ConfigFile)
+				// Debug logging of connection details
+				for i, conn := range multiDBConfig.Connections {
+					log.Printf("Connection [%d]: ID=%s, Type=%s, Host=%s, Port=%d, Name=%s",
+						i, conn.ID, conn.Type, conn.Host, conn.Port, conn.Name)
+				}
 			}
 		}
 	}

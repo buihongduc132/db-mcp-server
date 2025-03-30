@@ -14,9 +14,9 @@
       "type": "mysql",
       "host": "localhost",
       "port": 13307,
-      "name": "db3",
-      "user": "user3",
-      "password": "password3"
+      "name": "db2",
+      "user": "user2",
+      "password": "password2"
     }
   ]
 } 
