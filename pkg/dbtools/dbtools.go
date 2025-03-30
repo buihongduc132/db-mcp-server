@@ -14,6 +14,13 @@ import (
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
+// TODO: Refactor database connection management to support connection pooling
+// TODO: Add support for connection retries and circuit breaking
+// TODO: Implement comprehensive metrics collection for database operations
+// TODO: Consider using a context-aware connection management system
+// TODO: Add support for database migrations and versioning
+// TODO: Improve error handling with custom error types
+
 // DatabaseType represents a supported database type
 type DatabaseType string
 

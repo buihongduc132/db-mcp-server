@@ -9,6 +9,12 @@ import (
 	"github.com/FreePeak/cortex/pkg/tools"
 )
 
+// TODO: Refactor tool type implementations to reduce duplication and improve maintainability
+// TODO: Consider using a code generation approach for repetitive tool patterns
+// TODO: Add comprehensive request validation for all tool parameters
+// TODO: Implement proper rate limiting and resource protection
+// TODO: Add detailed documentation for each tool type and its parameters
+
 // ToolType interface defines the structure for different types of database tools
 type ToolType interface {
 	// GetName returns the base name of the tool type (e.g., "query", "execute")

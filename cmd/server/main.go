@@ -1,5 +1,10 @@
 package main
 
+// TODO: Refactor main.go to separate server initialization logic from configuration loading
+// TODO: Create dedicated server setup package for better separation of concerns
+// TODO: Implement structured logging instead of using standard log package
+// TODO: Consider using a configuration management library like Viper for better config handling
+
 import (
 	"context"
 	"flag"

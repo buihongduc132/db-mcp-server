@@ -10,6 +10,12 @@ import (
 	"github.com/FreePeak/db-mcp-server/internal/domain"
 )
 
+// TODO: Improve error handling with custom error types and better error messages
+// TODO: Add extensive unit tests for all business logic
+// TODO: Consider implementing domain events for better decoupling
+// TODO: Add request validation layer before processing in usecases
+// TODO: Implement proper context propagation and timeout handling
+
 // DatabaseUseCase defines operations for managing database functionality
 type DatabaseUseCase struct {
 	repo domain.DatabaseRepository

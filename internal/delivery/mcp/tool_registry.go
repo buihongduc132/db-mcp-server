@@ -1,5 +1,11 @@
 package mcp
 
+// TODO: Refactor tool registration to reduce code duplication
+// TODO: Implement better error handling with error types instead of generic errors
+// TODO: Add metrics collection for tool usage and performance
+// TODO: Improve logging with structured logs and log levels
+// TODO: Consider implementing tool discovery mechanism to avoid hardcoded tool lists
+
 import (
 	"context"
 	"fmt"
@@ -271,12 +277,10 @@ func (tr *ToolRegistry) RegisterCursorCompatibleTools(ctx context.Context) error
 	// Skip if the target name already starts with the standard prefix to avoid duplicates
 	if !strings.HasPrefix(listDbTarget, DefaultToolPrefix) {
 		if err := tr.createToolAlias(ctx, "list_databases", listDbSource, listDbTarget); err != nil {
-			log.Printf("Warning: failed to create cursor-compatible alias for list_databases: %v", err)
+			log.Printf("Warning: failed to create list_databases alias '%s': %v", listDbTarget, err)
 		} else {
-			log.Printf("Created cursor-compatible alias '%s' -> '%s'", listDbTarget, listDbSource)
+			log.Printf("Created list_databases alias '%s' -> '%s'", listDbTarget, listDbSource)
 		}
-	} else {
-		log.Printf("Skipping duplicate tool alias: %s", listDbTarget)
 	}
 
 	log.Printf("Registered cursor-compatible aliases with prefix '%s' for all tools", prefix)
