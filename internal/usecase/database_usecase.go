@@ -3,11 +3,18 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/internal/domain"
 )
+
+// TODO: Improve error handling with custom error types and better error messages
+// TODO: Add extensive unit tests for all business logic
+// TODO: Consider implementing domain events for better decoupling
+// TODO: Add request validation layer before processing in usecases
+// TODO: Implement proper context propagation and timeout handling
 
 // DatabaseUseCase defines operations for managing database functionality
 type DatabaseUseCase struct {
@@ -24,6 +31,80 @@ func NewDatabaseUseCase(repo domain.DatabaseRepository) *DatabaseUseCase {
 // ListDatabases returns a list of available databases
 func (uc *DatabaseUseCase) ListDatabases() []string {
 	return uc.repo.ListDatabases()
+}
+
+// GetDatabaseInfo returns information about a database
+func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{}, error) {
+	// Get database connection
+	db, err := uc.repo.GetDatabase(dbID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database: %w", err)
+	}
+
+	// Query for tables
+	ctx := context.Background()
+	var result map[string]interface{}
+
+	// Different queries for different database types
+	// For MySQL
+	query := "SELECT table_name, table_type, engine, table_rows, create_time FROM information_schema.tables WHERE table_schema = DATABASE()"
+	rows, err := db.Query(ctx, query)
+	if err != nil {
+		// Fallback to a simpler query
+		query = "SHOW TABLES"
+		rows, err = db.Query(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get schema information: %w", err)
+		}
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("error closing rows: %v", closeErr)
+		}
+	}()
+
+	// Process results
+	tables := []map[string]interface{}{}
+	columns, _ := rows.Columns()
+
+	// Prepare for scanning
+	values := make([]interface{}, len(columns))
+	valuePtrs := make([]interface{}, len(columns))
+	for i := range columns {
+		valuePtrs[i] = &values[i]
+	}
+
+	// Process each row
+	for rows.Next() {
+		if err := rows.Scan(valuePtrs...); err != nil {
+			continue
+		}
+
+		// Convert to map
+		tableInfo := make(map[string]interface{})
+		for i, colName := range columns {
+			val := values[i]
+			if val == nil {
+				tableInfo[colName] = nil
+			} else {
+				switch v := val.(type) {
+				case []byte:
+					tableInfo[colName] = string(v)
+				default:
+					tableInfo[colName] = v
+				}
+			}
+		}
+		tables = append(tables, tableInfo)
+	}
+
+	// Create result
+	result = map[string]interface{}{
+		"database": dbID,
+		"tables":   tables,
+	}
+
+	return result, nil
 }
 
 // ExecuteQuery executes a SQL query and returns the formatted results

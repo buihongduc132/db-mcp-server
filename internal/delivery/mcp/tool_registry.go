@@ -1,317 +1,287 @@
 package mcp
 
+// TODO: Refactor tool registration to reduce code duplication
+// TODO: Implement better error handling with error types instead of generic errors
+// TODO: Add metrics collection for tool usage and performance
+// TODO: Improve logging with structured logs and log levels
+// TODO: Consider implementing tool discovery mechanism to avoid hardcoded tool lists
+
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
+	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
-
-	"github.com/FreePeak/db-mcp-server/internal/usecase"
+	"github.com/FreePeak/cortex/pkg/server"
 )
 
-// ToolRegistry manages the creation and registration of database tools
+// DefaultToolPrefix is the default prefix for Cursor-compatible tool names
+const DefaultToolPrefix = "mcp_cashflow_db_mcp_server_sse_"
+
+// ToolRegistry structure to handle tool registration
 type ToolRegistry struct {
-	server          *server.MCPServer
-	databaseUseCase *usecase.DatabaseUseCase
+	server          *ServerWrapper
+	mcpServer       *server.MCPServer
+	databaseUseCase UseCaseProvider
+	factory         *ToolTypeFactory
 }
 
 // NewToolRegistry creates a new tool registry
-func NewToolRegistry(mcpServer *server.MCPServer, databaseUseCase *usecase.DatabaseUseCase) *ToolRegistry {
+func NewToolRegistry(mcpServer *server.MCPServer) *ToolRegistry {
+	factory := NewToolTypeFactory()
 	return &ToolRegistry{
-		server:          mcpServer,
-		databaseUseCase: databaseUseCase,
+		server:    NewServerWrapper(mcpServer),
+		mcpServer: mcpServer,
+		factory:   factory,
 	}
 }
 
-// RegisterAllTools registers all available database tools
-func (tr *ToolRegistry) RegisterAllTools() {
-	// Get available database connections
-	dbIDs := tr.databaseUseCase.ListDatabases()
+// RegisterAllTools registers all tools with the server
+func (tr *ToolRegistry) RegisterAllTools(ctx context.Context, useCase UseCaseProvider) error {
+	tr.databaseUseCase = useCase
 
-	// If no database connections are available, register mock tools
-	if len(dbIDs) == 0 {
-		// fmt.Println("No active database connections. Registering mock database tools.")
-		tr.RegisterMockTools()
-		return
+	// Get available databases
+	dbList := useCase.ListDatabases()
+	log.Printf("Found %d database connections for tool registration: %v", len(dbList), dbList)
+
+	if len(dbList) == 0 {
+		log.Printf("No databases available, registering mock tools")
+		return tr.RegisterMockTools(ctx)
 	}
 
-	// Register tools for each database
-	for _, dbID := range dbIDs {
-		tr.registerDatabaseTools(dbID)
+	// Register database-specific tools
+	registrationErrors := 0
+	for _, dbID := range dbList {
+		if err := tr.registerDatabaseTools(ctx, dbID); err != nil {
+			log.Printf("Error registering tools for database %s: %v", dbID, err)
+			registrationErrors++
+		} else {
+			log.Printf("Successfully registered tools for database %s", dbID)
+		}
 	}
 
-	// Register common tools (not specific to a database)
-	tr.registerCommonTools()
+	// Register common tools
+	tr.registerCommonTools(ctx)
+
+	// Only register cursor tools if we're not skipping them and the prefix isn't already configured
+	// to be the cursor-compatible one
+	if os.Getenv("MCP_SKIP_CURSOR_TOOLS") != "true" && getToolNamePrefix() != DefaultToolPrefix {
+		log.Printf("Registering cursor-compatible tool aliases")
+		if err := tr.RegisterCursorCompatibleTools(ctx); err != nil {
+			log.Printf("Error registering cursor-compatible tools: %v", err)
+			registrationErrors++
+		}
+	} else {
+		log.Printf("Skipping cursor-compatible tool aliases - using direct naming")
+	}
+
+	if registrationErrors > 0 {
+		return fmt.Errorf("errors occurred while registering tools for %d databases", registrationErrors)
+	}
+	return nil
 }
 
 // registerDatabaseTools registers all tools for a specific database
-func (tr *ToolRegistry) registerDatabaseTools(dbID string) {
-	// Register query tool
-	tr.registerQueryTool(dbID)
+func (tr *ToolRegistry) registerDatabaseTools(ctx context.Context, dbID string) error {
+	// Get all tool types from the factory
+	toolTypeNames := []string{
+		"query", "execute", "transaction", "performance", "schema",
+	}
 
-	// Register execute tool
-	tr.registerExecuteTool(dbID)
+	log.Printf("Registering tools for database %s", dbID)
 
-	// Register transaction tool
-	tr.registerTransactionTool(dbID)
+	// Check if this database actually exists
+	dbInfo, err := tr.databaseUseCase.GetDatabaseInfo(dbID)
+	if err != nil {
+		return fmt.Errorf("failed to get database info for %s: %w", dbID, err)
+	}
 
-	// Register performance analyzer tool
-	tr.registerPerformanceTool(dbID)
+	log.Printf("Database %s info: %+v", dbID, dbInfo)
 
-	// Register schema tool
-	tr.registerSchemaTool(dbID)
+	// Register each tool type for this database
+	registrationErrors := 0
+	for _, typeName := range toolTypeNames {
+		toolName := fmt.Sprintf("%s_%s", typeName, dbID)
+		if err := tr.registerTool(ctx, typeName, toolName, dbID); err != nil {
+			log.Printf("Error registering tool %s: %v", toolName, err)
+			registrationErrors++
+		} else {
+			log.Printf("Successfully registered tool %s", toolName)
+		}
+	}
+
+	if registrationErrors > 0 {
+		return fmt.Errorf("errors occurred while registering %d tools", registrationErrors)
+	}
+
+	log.Printf("Completed registering tools for database %s", dbID)
+	return nil
 }
 
-// registerQueryTool registers a tool for executing SQL queries
-func (tr *ToolRegistry) registerQueryTool(dbID string) {
-	tr.server.AddTool(
-		mcp.NewTool(
-			fmt.Sprintf("query_%s", dbID),
-			mcp.WithDescription(fmt.Sprintf("Execute SQL query on %s database", dbID)),
-			mcp.WithString("query",
-				mcp.Description("SQL query to execute"),
-				mcp.Required(),
-			),
-			mcp.WithArray("params",
-				mcp.Description("Query parameters"),
-			),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// Extract parameters
-			query, ok := request.Params.Arguments["query"].(string)
-			if !ok {
-				return nil, fmt.Errorf("query parameter must be a string")
-			}
+// registerTool registers a tool with the server
+func (tr *ToolRegistry) registerTool(ctx context.Context, toolTypeName string, name string, dbID string) error {
+	log.Printf("Registering tool '%s' of type '%s' (database: %s)", name, toolTypeName, dbID)
 
-			var queryParams []interface{}
-			if request.Params.Arguments["params"] != nil {
-				if paramsArr, ok := request.Params.Arguments["params"].([]interface{}); ok {
-					queryParams = paramsArr
-				}
-			}
+	toolTypeImpl, ok := tr.factory.GetToolType(toolTypeName)
+	if !ok {
+		return fmt.Errorf("failed to get tool type for '%s'", toolTypeName)
+	}
 
-			// Execute query via use case
-			result, err := tr.databaseUseCase.ExecuteQuery(ctx, dbID, query, queryParams)
-			if err != nil {
-				return nil, fmt.Errorf("query execution failed: %v", err)
-			}
+	tool := toolTypeImpl.CreateTool(name, dbID)
 
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-}
-
-// registerExecuteTool registers a tool for executing data modification statements
-func (tr *ToolRegistry) registerExecuteTool(dbID string) {
-	tr.server.AddTool(
-		mcp.NewTool(
-			fmt.Sprintf("execute_%s", dbID),
-			mcp.WithDescription(fmt.Sprintf("Execute SQL statement on %s database", dbID)),
-			mcp.WithString("statement",
-				mcp.Description("SQL statement to execute (INSERT, UPDATE, DELETE, etc.)"),
-				mcp.Required(),
-			),
-			mcp.WithArray("params",
-				mcp.Description("Statement parameters"),
-			),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// Extract parameters
-			statement, ok := request.Params.Arguments["statement"].(string)
-			if !ok {
-				return nil, fmt.Errorf("statement parameter must be a string")
-			}
-
-			var statementParams []interface{}
-			if request.Params.Arguments["params"] != nil {
-				if paramsArr, ok := request.Params.Arguments["params"].([]interface{}); ok {
-					statementParams = paramsArr
-				}
-			}
-
-			// Execute statement via use case
-			result, err := tr.databaseUseCase.ExecuteStatement(ctx, dbID, statement, statementParams)
-			if err != nil {
-				return nil, fmt.Errorf("statement execution failed: %v", err)
-			}
-
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-}
-
-// registerTransactionTool registers a tool for managing database transactions
-func (tr *ToolRegistry) registerTransactionTool(dbID string) {
-	tr.server.AddTool(
-		mcp.NewTool(
-			fmt.Sprintf("transaction_%s", dbID),
-			mcp.WithDescription(fmt.Sprintf("Manage transactions on %s database", dbID)),
-			mcp.WithString("action",
-				mcp.Description("Transaction action (begin, commit, rollback, execute)"),
-				mcp.Required(),
-			),
-			mcp.WithString("transactionId",
-				mcp.Description("Transaction ID (required for commit, rollback, execute)"),
-			),
-			mcp.WithString("statement",
-				mcp.Description("SQL statement to execute within transaction (required for execute)"),
-			),
-			mcp.WithArray("params",
-				mcp.Description("Statement parameters"),
-			),
-			mcp.WithBoolean("readOnly",
-				mcp.Description("Whether the transaction is read-only (for begin)"),
-			),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// Extract parameters
-			action, ok := request.Params.Arguments["action"].(string)
-			if !ok {
-				return nil, fmt.Errorf("action parameter must be a string")
-			}
-
-			txID := ""
-			if request.Params.Arguments["transactionId"] != nil {
-				txID, _ = request.Params.Arguments["transactionId"].(string)
-			}
-
-			statement := ""
-			if request.Params.Arguments["statement"] != nil {
-				statement, _ = request.Params.Arguments["statement"].(string)
-			}
-
-			var params []interface{}
-			if request.Params.Arguments["params"] != nil {
-				if paramsArr, ok := request.Params.Arguments["params"].([]interface{}); ok {
-					params = paramsArr
-				}
-			}
-
-			readOnly := false
-			if request.Params.Arguments["readOnly"] != nil {
-				readOnly, _ = request.Params.Arguments["readOnly"].(bool)
-			}
-
-			// Execute transaction operation via use case
-			result, extraData, err := tr.databaseUseCase.ExecuteTransaction(
-				ctx, dbID, action, txID, statement, params, readOnly,
-			)
-			if err != nil {
-				return nil, fmt.Errorf("transaction operation failed: %v", err)
-			}
-
-			if extraData != nil {
-				// Convert extraData to JSON string
-				return mcp.NewToolResultText(fmt.Sprintf("Transaction operation successful: %s", result)), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-}
-
-// registerPerformanceTool registers a tool for analyzing database performance
-func (tr *ToolRegistry) registerPerformanceTool(dbID string) {
-	// This is a placeholder - in a real implementation, we would need a performance use case
-	tr.server.AddTool(
-		mcp.NewTool(
-			fmt.Sprintf("performance_%s", dbID),
-			mcp.WithDescription(fmt.Sprintf("Analyze query performance on %s database", dbID)),
-			mcp.WithString("action",
-				mcp.Description("Action (getSlowQueries, getMetrics, analyzeQuery, reset, setThreshold)"),
-				mcp.Required(),
-			),
-			mcp.WithString("query",
-				mcp.Description("SQL query to analyze (required for analyzeQuery)"),
-			),
-			mcp.WithNumber("limit",
-				mcp.Description("Maximum number of results to return"),
-			),
-			mcp.WithNumber("threshold",
-				mcp.Description("Slow query threshold in milliseconds (required for setThreshold)"),
-			),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// This is just a placeholder - in a real implementation we would call the performance use case
-			return mcp.NewToolResultText("Performance analysis not implemented in this refactored version"), nil
-		},
-	)
-}
-
-// registerSchemaTool registers a tool for exploring database schema
-func (tr *ToolRegistry) registerSchemaTool(dbID string) {
-	// This is a placeholder - in a real implementation, we would need a schema use case
-	tr.server.AddTool(
-		mcp.NewTool(
-			fmt.Sprintf("schema_%s", dbID),
-			mcp.WithDescription(fmt.Sprintf("Get schema of %s database", dbID)),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// This is just a placeholder - in a real implementation we would call the schema use case
-			return mcp.NewToolResultText("Schema information not implemented in this refactored version"), nil
-		},
-	)
+	return tr.server.AddTool(ctx, tool, func(ctx context.Context, request server.ToolCallRequest) (interface{}, error) {
+		response, err := toolTypeImpl.HandleRequest(ctx, request, dbID, tr.databaseUseCase)
+		return FormatResponse(response, err)
+	})
 }
 
 // registerCommonTools registers tools that are not specific to a database
-func (tr *ToolRegistry) registerCommonTools() {
-	tr.server.AddTool(
-		mcp.NewTool(
-			"list_databases",
-			mcp.WithDescription("List all available databases"),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			dbIDs := tr.databaseUseCase.ListDatabases()
-
-			if len(dbIDs) == 0 {
-				return mcp.NewToolResultText("No databases available"), nil
-			}
-
-			result := fmt.Sprintf("Available databases (%d):\n\n", len(dbIDs))
-			for _, id := range dbIDs {
-				result += fmt.Sprintf("- %s\n", id)
-			}
-
-			return mcp.NewToolResultText(result), nil
-		},
-	)
+func (tr *ToolRegistry) registerCommonTools(ctx context.Context) {
+	// Register the list_databases tool
+	_, ok := tr.factory.GetToolType("list_databases")
+	if ok {
+		if err := tr.registerTool(ctx, "list_databases", "list_databases", ""); err != nil {
+			log.Printf("Error registering list_databases tool: %v", err)
+		}
+	}
 }
 
-// RegisterMockTools registers mock database tools when no real connections are available
-func (tr *ToolRegistry) RegisterMockTools() {
-	// Register a mock query tool
-	tr.server.AddTool(
-		mcp.NewTool(
-			"query_mock",
-			mcp.WithDescription("Execute SQL query on mock database"),
-			mcp.WithString("query",
-				mcp.Description("SQL query to execute"),
-				mcp.Required(),
-			),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			query, _ := request.Params.Arguments["query"].(string)
+// createToolAlias creates an alias for an existing tool
+func (tr *ToolRegistry) createToolAlias(ctx context.Context, toolTypeName string, existingName string, aliasName string) error {
+	log.Printf("Creating alias '%s' for tool '%s' of type '%s'", aliasName, existingName, toolTypeName)
 
-			// Generate mock response
-			return mcp.NewToolResultText(fmt.Sprintf("Mock query executed: %s\n\nID\tName\tValue\n-------------------\n1\tTest1\t100\n2\tTest2\t200\n\nTotal rows: 2", query)), nil
-		},
-	)
+	toolTypeImpl, ok := tr.factory.GetToolType(toolTypeName)
+	if !ok {
+		return fmt.Errorf("failed to get tool type for '%s'", toolTypeName)
+	}
 
-	// Register a mock execute tool
-	tr.server.AddTool(
-		mcp.NewTool(
-			"execute_mock",
-			mcp.WithDescription("Execute SQL statement on mock database"),
-			mcp.WithString("statement",
-				mcp.Description("SQL statement to execute"),
-				mcp.Required(),
-			),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			statement, _ := request.Params.Arguments["statement"].(string)
+	// For aliases that apply to a specific database, extract the dbID from the existing name
+	// This is a simplification - in a real implementation we'd have to look up the actual dbID
+	dbID := ""
 
-			// Generate mock response
-			return mcp.NewToolResultText(fmt.Sprintf("Mock statement executed: %s\n\nRows affected: 1\nLast insert ID: 42", statement)), nil
-		},
-	)
+	// Create a new tool with the alias name but delegate to the original handler
+	tool := toolTypeImpl.CreateTool(aliasName, dbID)
+
+	return tr.server.AddTool(ctx, tool, func(ctx context.Context, request server.ToolCallRequest) (interface{}, error) {
+		response, err := toolTypeImpl.HandleRequest(ctx, request, dbID, tr.databaseUseCase)
+		return FormatResponse(response, err)
+	})
+}
+
+// getToolNamePrefix returns the prefix to use for Cursor-compatible tool names
+func getToolNamePrefix() string {
+	// Check if we should disable using the cortex prefix completely
+	if os.Getenv("MCP_DISABLE_CORTEX_PREFIX") == "true" {
+		return DefaultToolPrefix
+	}
+
+	// Check if a custom prefix is defined in environment variable
+	customPrefix := os.Getenv("MCP_TOOL_PREFIX")
+	if customPrefix != "" {
+		return customPrefix
+	}
+
+	// Use a consistent default that matches what Cursor expects
+	return DefaultToolPrefix
+}
+
+// RegisterMockTools registers mock tools with the server when no db connections available
+func (tr *ToolRegistry) RegisterMockTools(ctx context.Context) error {
+	log.Printf("Registering mock tools")
+
+	// For each tool type, register a mock tool
+	for toolTypeName := range tr.factory.toolTypes {
+		mockToolName := fmt.Sprintf("mock_%s", toolTypeName)
+
+		toolTypeImpl, ok := tr.factory.GetToolType(toolTypeName)
+		if !ok {
+			log.Printf("Failed to get tool type for '%s'", toolTypeName)
+			continue
+		}
+
+		tool := toolTypeImpl.CreateTool(mockToolName, "mock")
+
+		err := tr.server.AddTool(ctx, tool, func(ctx context.Context, request server.ToolCallRequest) (interface{}, error) {
+			response, err := toolTypeImpl.HandleRequest(ctx, request, "mock", tr.databaseUseCase)
+			return FormatResponse(response, err)
+		})
+
+		if err != nil {
+			log.Printf("Failed to register mock tool '%s': %v", mockToolName, err)
+			continue
+		}
+
+		// Create cursor-compatible alias for the mock tool
+		cursorName := mockToolName
+		if strings.HasPrefix(toolTypeName, "database_") {
+			cursorName = strings.TrimPrefix(toolTypeName, "database_")
+		}
+
+		if cursorName != mockToolName {
+			if err := tr.createToolAlias(ctx, toolTypeName, mockToolName, cursorName); err != nil {
+				log.Printf("Failed to create cursor alias for mock tool '%s': %v", mockToolName, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// RegisterCursorCompatibleTools registers aliases for all tools with Cursor-compatible naming
+func (tr *ToolRegistry) RegisterCursorCompatibleTools(ctx context.Context) error {
+	// Check if we should skip cursor tool registration
+	if os.Getenv("MCP_SKIP_CURSOR_TOOLS") == "true" {
+		log.Printf("Skipping cursor tool registration due to MCP_SKIP_CURSOR_TOOLS=true")
+		return nil
+	}
+
+	prefix := getToolNamePrefix()
+
+	// If prefix is already the default, we don't need to create aliases
+	if prefix == DefaultToolPrefix {
+		log.Printf("Using standard prefix '%s', skipping duplicate tool registration", prefix)
+		return nil
+	}
+
+	// Get all registered databases
+	databases := tr.databaseUseCase.ListDatabases()
+	log.Printf("Creating Cursor-compatible aliases with prefix '%s' for %d databases", prefix, len(databases))
+
+	// For each database and tool type, create a cursor-compatible alias
+	for _, dbID := range databases {
+		for _, toolType := range []string{"query", "execute", "transaction", "performance", "schema"} {
+			sourceName := fmt.Sprintf("%s_%s", toolType, dbID)
+			targetName := fmt.Sprintf("%s%s_%s", prefix, dbID, toolType)
+
+			// Skip if the target name already starts with the standard prefix to avoid duplicates
+			if strings.HasPrefix(targetName, DefaultToolPrefix) {
+				log.Printf("Skipping duplicate tool alias: %s", targetName)
+				continue
+			}
+
+			// Register the alias tool
+			if err := tr.createToolAlias(ctx, toolType, sourceName, targetName); err != nil {
+				log.Printf("Warning: failed to create cursor-compatible alias '%s': %v", targetName, err)
+			} else {
+				log.Printf("Created cursor-compatible alias '%s' -> '%s'", targetName, sourceName)
+			}
+		}
+	}
+
+	// Don't forget the list_databases tool
+	listDbSource := "list_databases"
+	listDbTarget := fmt.Sprintf("%slist_databases", prefix)
+
+	// Skip if the target name already starts with the standard prefix to avoid duplicates
+	if !strings.HasPrefix(listDbTarget, DefaultToolPrefix) {
+		if err := tr.createToolAlias(ctx, "list_databases", listDbSource, listDbTarget); err != nil {
+			log.Printf("Warning: failed to create list_databases alias '%s': %v", listDbTarget, err)
+		} else {
+			log.Printf("Created list_databases alias '%s' -> '%s'", listDbTarget, listDbSource)
+		}
+	}
+
+	log.Printf("Registered cursor-compatible aliases with prefix '%s' for all tools", prefix)
+	return nil
 }

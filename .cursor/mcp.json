@@ -1,7 +1,13 @@
 {
     "mcpServers": {
-        "cashflow-db-mcp-server-sse": {
+        "db-mcp-server-sse": {
             "url": "http://127.0.0.1:9090/sse"
+        },
+        "db-mcp-server-stdio": {
+            "command": "./server -t stdio -c ./config.json"
+        },
+        "db-mcp-server-docker-sse": {
+            "url": "http://127.0.0.1:9092/sse"
         }
     }
 }

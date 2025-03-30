@@ -3,8 +3,8 @@
     {
       "id": "mysql1",
       "type": "mysql",
-      "host": "localhost",
-      "port": 13306,
+      "host": "mysql1",
+      "port": 3306,
       "name": "db1",
       "user": "user1",
       "password": "password1"
@@ -12,11 +12,11 @@
     {
       "id": "mysql2",
       "type": "mysql",
-      "host": "localhost",
-      "port": 13307,
-      "name": "db3",
-      "user": "user3",
-      "password": "password3"
+      "host": "mysql2",
+      "port": 3306,
+      "name": "db2",
+      "user": "user2",
+      "password": "password2"
     }
   ]
 } 

@@ -8,6 +8,12 @@ import (
 	"github.com/FreePeak/db-mcp-server/pkg/dbtools"
 )
 
+// TODO: Implement caching layer for database metadata to improve performance
+// TODO: Add observability with tracing and detailed metrics
+// TODO: Improve concurrency handling with proper locking or atomic operations
+// TODO: Consider using an interface-based approach for better testability
+// TODO: Add comprehensive integration tests for different database types
+
 // DatabaseRepository implements domain.DatabaseRepository
 type DatabaseRepository struct{}
 
