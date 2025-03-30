@@ -98,7 +98,20 @@ func (t *QueryTool) HandleRequest(ctx context.Context, request server.ToolCallRe
 		}
 	}
 
-	return useCase.ExecuteQuery(ctx, dbID, query, queryParams)
+	result, err := useCase.ExecuteQuery(ctx, dbID, query, queryParams)
+	if err != nil {
+		return nil, err
+	}
+
+	// Format response according to MCP protocol requirements
+	return map[string]interface{}{
+		"content": []map[string]interface{}{
+			{
+				"type": "text",
+				"text": result,
+			},
+		},
+	}, nil
 }
 
 //------------------------------------------------------------------------------
@@ -149,7 +162,20 @@ func (t *ExecuteTool) HandleRequest(ctx context.Context, request server.ToolCall
 		}
 	}
 
-	return useCase.ExecuteStatement(ctx, dbID, statement, statementParams)
+	result, err := useCase.ExecuteStatement(ctx, dbID, statement, statementParams)
+	if err != nil {
+		return nil, err
+	}
+
+	// Format response according to MCP protocol requirements
+	return map[string]interface{}{
+		"content": []map[string]interface{}{
+			{
+				"type": "text",
+				"text": result,
+			},
+		},
+	}, nil
 }
 
 //------------------------------------------------------------------------------
@@ -229,14 +255,22 @@ func (t *TransactionTool) HandleRequest(ctx context.Context, request server.Tool
 		return nil, err
 	}
 
-	if metadata != nil {
-		return map[string]interface{}{
-			"message":  message,
-			"metadata": metadata,
-		}, nil
+	// Format response according to MCP protocol
+	response := map[string]interface{}{
+		"content": []map[string]interface{}{
+			{
+				"type": "text",
+				"text": message,
+			},
+		},
 	}
 
-	return message, nil
+	// Add metadata if provided
+	if metadata != nil {
+		response["metadata"] = metadata
+	}
+
+	return response, nil
 }
 
 //------------------------------------------------------------------------------
@@ -280,20 +314,56 @@ func (t *PerformanceTool) CreateTool(name string, dbID string) interface{} {
 }
 
 // HandleRequest handles performance tool requests
-// This is just a placeholder that returns mock data
 func (t *PerformanceTool) HandleRequest(ctx context.Context, request server.ToolCallRequest, dbID string, useCase UseCaseProvider) (interface{}, error) {
+	// This is a simplified implementation
+	// In a real implementation, this would analyze query performance
+
 	action, ok := request.Parameters["action"].(string)
 	if !ok {
 		return nil, fmt.Errorf("action parameter must be a string")
 	}
 
-	// This is a simplified implementation that just returns mock data
+	var limit int
+	if request.Parameters["limit"] != nil {
+		if limitParam, ok := request.Parameters["limit"].(float64); ok {
+			limit = int(limitParam)
+		}
+	}
+
+	query := ""
+	if request.Parameters["query"] != nil {
+		query, _ = request.Parameters["query"].(string)
+	}
+
+	var threshold int
+	if request.Parameters["threshold"] != nil {
+		if thresholdParam, ok := request.Parameters["threshold"].(float64); ok {
+			threshold = int(thresholdParam)
+		}
+	}
+
+	// This is where we would call the useCase to analyze performance
+	// For now, just return a placeholder
+	output := fmt.Sprintf("Performance analysis for action '%s' on database '%s'\n", action, dbID)
+
+	if query != "" {
+		output += fmt.Sprintf("Query: %s\n", query)
+	}
+
+	if limit > 0 {
+		output += fmt.Sprintf("Limit: %d\n", limit)
+	}
+
+	if threshold > 0 {
+		output += fmt.Sprintf("Threshold: %d ms\n", threshold)
+	}
+
 	return map[string]interface{}{
-		"message": fmt.Sprintf("Performance analysis '%s' executed on database %s", action, dbID),
-		"metrics": map[string]interface{}{
-			"avgQueryTime": 0.05,
-			"totalQueries": 100,
-			"slowQueries":  2,
+		"content": []map[string]interface{}{
+			{
+				"type": "text",
+				"text": output,
+			},
 		},
 	}, nil
 }
@@ -331,7 +401,27 @@ func (t *SchemaTool) CreateTool(name string, dbID string) interface{} {
 
 // HandleRequest handles schema tool requests
 func (t *SchemaTool) HandleRequest(ctx context.Context, request server.ToolCallRequest, dbID string, useCase UseCaseProvider) (interface{}, error) {
-	return useCase.GetDatabaseInfo(dbID)
+	info, err := useCase.GetDatabaseInfo(dbID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Format response according to MCP protocol
+	infoStr := fmt.Sprintf("Database Schema for %s:\n\n", dbID)
+	if schemaInfo, ok := info["schema"].(string); ok {
+		infoStr += schemaInfo
+	} else {
+		infoStr += fmt.Sprintf("%v", info)
+	}
+
+	return map[string]interface{}{
+		"content": []map[string]interface{}{
+			{
+				"type": "text",
+				"text": infoStr,
+			},
+		},
+	}, nil
 }
 
 //------------------------------------------------------------------------------
@@ -367,9 +457,25 @@ func (t *ListDatabasesTool) CreateTool(name string, dbID string) interface{} {
 
 // HandleRequest handles list databases tool requests
 func (t *ListDatabasesTool) HandleRequest(ctx context.Context, request server.ToolCallRequest, dbID string, useCase UseCaseProvider) (interface{}, error) {
-	dbIDs := useCase.ListDatabases()
+	databases := useCase.ListDatabases()
+
+	// Format as JSON array for display
+	output := "Available databases:\n\n"
+	for i, db := range databases {
+		output += fmt.Sprintf("%d. %s\n", i+1, db)
+	}
+
+	if len(databases) == 0 {
+		output += "No databases configured.\n"
+	}
+
 	return map[string]interface{}{
-		"databases": dbIDs,
+		"content": []map[string]interface{}{
+			{
+				"type": "text",
+				"text": output,
+			},
+		},
 	}, nil
 }
 
