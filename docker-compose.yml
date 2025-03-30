@@ -7,10 +7,13 @@ services:
       - "9092:9092"
     volumes:
       - ./config.json:/app/config.json
-    command: ["/app/server", "-t", "sse", "-c", "/app/config.json"]
+      - ./wait-for-it.sh:/app/wait-for-it.sh
+    command: ["/bin/sh", "-c", "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1:3306 -t 60 && /app/wait-for-it.sh mysql2:3306 -t 60 && /app/server -t sse -c /app/config.json"]
     depends_on:
-      - mysql1
-      - mysql2
+      mysql1:
+        condition: service_healthy
+      mysql2:
+        condition: service_healthy
 
   mysql1:
     image: mysql:8.0
@@ -19,11 +22,17 @@ services:
       MYSQL_DATABASE: db1
       MYSQL_USER: user1
       MYSQL_PASSWORD: password1
+      MYSQL_AUTHENTICATION_PLUGIN: mysql_native_password
     ports:
       - "13306:3306"
     volumes:
       - mysql1_data:/var/lib/mysql
-    command: --default-authentication-plugin=mysql_native_password
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   mysql2:
     image: mysql:8.0
@@ -32,11 +41,17 @@ services:
       MYSQL_DATABASE: db2
       MYSQL_USER: user2
       MYSQL_PASSWORD: password2
+      MYSQL_AUTHENTICATION_PLUGIN: mysql_native_password
     ports:
       - "13307:3306"
     volumes:
       - mysql2_data:/var/lib/mysql
-    command: --default-authentication-plugin=mysql_native_password
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   mysql1_data:
