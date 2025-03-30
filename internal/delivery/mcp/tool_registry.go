@@ -219,8 +219,7 @@ func (tr *ToolRegistry) RegisterMockTools(ctx context.Context) error {
 		}
 
 		if cursorName != mockToolName {
-			err = tr.createToolAlias(ctx, toolTypeName, mockToolName, cursorName)
-			if err != nil {
+			if err := tr.createToolAlias(ctx, toolTypeName, mockToolName, cursorName); err != nil {
 				log.Printf("Failed to create cursor alias for mock tool '%s': %v", mockToolName, err)
 			}
 		}

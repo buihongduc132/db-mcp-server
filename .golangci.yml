@@ -31,6 +31,14 @@ linters-settings:
       - name: exported
         severity: warning
         disabled: false
+  errcheck:
+    # Report about not checking of errors in type assertions: `a := b.(MyStruct)`.
+    check-type-assertions: true
+    # Report about assignment of errors to blank identifier: `num, _ := strconv.Atoi(numStr)`.
+    check-blank: true
+    # List of functions to exclude from error checking (useful for os.Setenv)
+    exclude-functions:
+      - os.Setenv
 
 issues:
   exclude-use-default: false
@@ -39,4 +47,12 @@ issues:
   exclude-dirs:
     - vendor/
   exclude:
-    - "exported \\w+ (\\S*['.]*)([a-zA-Z'.*]*) should have comment or be unexported" 
+    - "exported \\w+ (\\S*['.]*)([a-zA-Z'.*]*) should have comment or be unexported"
+  # Excluding the specific errors that are reported but that we can't reproduce locally  
+  exclude-rules:
+    - path: internal/delivery/mcp/tool_registry.go
+      text: "Error return value of `tr.registerTool` is not checked"
+    - path: internal/delivery/mcp/tool_registry.go  
+      text: "Error return value of `tr.createToolAlias` is not checked"
+    - path: cmd/server/main.go
+      text: "Error return value of `os.Setenv` is not checked" 

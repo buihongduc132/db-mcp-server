@@ -5,6 +5,9 @@
         },
         "db-mcp-server-stdio": {
             "command": "./server -t stdio -c ./config.json"
+        },
+        "db-mcp-server-docker-sse": {
+            "url": "http://127.0.0.1:9092/sse"
         }
     }
 }
