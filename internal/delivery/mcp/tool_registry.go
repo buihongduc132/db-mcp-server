@@ -10,9 +10,8 @@ import (
 	"github.com/FreePeak/cortex/pkg/server"
 )
 
-const (
-	toolPrefix = "cortex"
-)
+// DefaultToolPrefix is the default prefix for Cursor-compatible tool names
+const DefaultToolPrefix = "mcp_cashflow_db_mcp_server_sse_"
 
 // ToolRegistry structure to handle tool registration
 type ToolRegistry struct {
@@ -30,63 +29,6 @@ func NewToolRegistry(mcpServer *server.MCPServer) *ToolRegistry {
 		mcpServer: mcpServer,
 		factory:   factory,
 	}
-}
-
-// EnsureValidResponse wraps tool responses to ensure they follow JSON-RPC 2.0 format
-func EnsureValidResponse(response interface{}, err error) (interface{}, error) {
-	if err != nil {
-		// Already formatted as JSON-RPC error
-		return response, err
-	}
-
-	// For nil responses, return empty object to avoid null result
-	if response == nil {
-		return map[string]interface{}{
-			"content": []map[string]interface{}{},
-		}, nil
-	}
-
-	// If response is already properly formatted with content as an array, return it
-	if respMap, ok := response.(map[string]interface{}); ok {
-		if content, exists := respMap["content"]; exists {
-			if _, isArray := content.([]interface{}); isArray {
-				return respMap, nil
-			}
-		}
-		// If it has other fields but not properly formatted content, add it
-		if _, hasContent := respMap["content"]; !hasContent {
-			// Convert to JSON string for display
-			respMap["content"] = []map[string]interface{}{
-				{
-					"type": "text",
-					"text": fmt.Sprintf("%v", response),
-				},
-			}
-			return respMap, nil
-		}
-	}
-
-	// Handle string responses by wrapping in proper content array format
-	if strResponse, ok := response.(string); ok {
-		return map[string]interface{}{
-			"content": []map[string]interface{}{
-				{
-					"type": "text",
-					"text": strResponse,
-				},
-			},
-		}, nil
-	}
-
-	// For any other type, convert to string and wrap in proper content format
-	return map[string]interface{}{
-		"content": []map[string]interface{}{
-			{
-				"type": "text",
-				"text": fmt.Sprintf("%v", response),
-			},
-		},
-	}, nil
 }
 
 // RegisterAllTools registers all tools with the server
@@ -118,7 +60,7 @@ func (tr *ToolRegistry) RegisterAllTools(ctx context.Context, useCase UseCasePro
 
 	// Only register cursor tools if we're not skipping them and the prefix isn't already configured
 	// to be the cursor-compatible one
-	if os.Getenv("MCP_SKIP_CURSOR_TOOLS") != "true" && getToolNamePrefix() != toolPrefix {
+	if os.Getenv("MCP_SKIP_CURSOR_TOOLS") != "true" && getToolNamePrefix() != DefaultToolPrefix {
 		log.Printf("Registering cursor-compatible tool aliases")
 		if err := tr.RegisterCursorCompatibleTools(ctx); err != nil {
 			log.Printf("Error registering cursor-compatible tools: %v", err)
@@ -184,7 +126,7 @@ func (tr *ToolRegistry) registerTool(ctx context.Context, toolTypeName string, n
 
 	return tr.server.AddTool(ctx, tool, func(ctx context.Context, request server.ToolCallRequest) (interface{}, error) {
 		response, err := toolTypeImpl.HandleRequest(ctx, request, dbID, tr.databaseUseCase)
-		return EnsureValidResponse(response, err)
+		return FormatResponse(response, err)
 	})
 }
 
@@ -193,7 +135,9 @@ func (tr *ToolRegistry) registerCommonTools(ctx context.Context) {
 	// Register the list_databases tool
 	_, ok := tr.factory.GetToolType("list_databases")
 	if ok {
-		tr.registerTool(ctx, "list_databases", "list_databases", "")
+		if err := tr.registerTool(ctx, "list_databases", "list_databases", ""); err != nil {
+			log.Printf("Error registering list_databases tool: %v", err)
+		}
 	}
 }
 
@@ -215,7 +159,7 @@ func (tr *ToolRegistry) createToolAlias(ctx context.Context, toolTypeName string
 
 	return tr.server.AddTool(ctx, tool, func(ctx context.Context, request server.ToolCallRequest) (interface{}, error) {
 		response, err := toolTypeImpl.HandleRequest(ctx, request, dbID, tr.databaseUseCase)
-		return EnsureValidResponse(response, err)
+		return FormatResponse(response, err)
 	})
 }
 
@@ -223,7 +167,7 @@ func (tr *ToolRegistry) createToolAlias(ctx context.Context, toolTypeName string
 func getToolNamePrefix() string {
 	// Check if we should disable using the cortex prefix completely
 	if os.Getenv("MCP_DISABLE_CORTEX_PREFIX") == "true" {
-		return toolPrefix
+		return DefaultToolPrefix
 	}
 
 	// Check if a custom prefix is defined in environment variable
@@ -232,9 +176,8 @@ func getToolNamePrefix() string {
 		return customPrefix
 	}
 
-	// Use a consistent default
-	// This matches what Cursor expects
-	return toolPrefix
+	// Use a consistent default that matches what Cursor expects
+	return DefaultToolPrefix
 }
 
 // RegisterMockTools registers mock tools with the server when no db connections available
@@ -255,7 +198,7 @@ func (tr *ToolRegistry) RegisterMockTools(ctx context.Context) error {
 
 		err := tr.server.AddTool(ctx, tool, func(ctx context.Context, request server.ToolCallRequest) (interface{}, error) {
 			response, err := toolTypeImpl.HandleRequest(ctx, request, "mock", tr.databaseUseCase)
-			return EnsureValidResponse(response, err)
+			return FormatResponse(response, err)
 		})
 
 		if err != nil {
@@ -290,8 +233,8 @@ func (tr *ToolRegistry) RegisterCursorCompatibleTools(ctx context.Context) error
 
 	prefix := getToolNamePrefix()
 
-	// If prefix is already "mcp_cashflow_db_mcp_server_sse", we don't need to create aliases
-	if prefix == "mcp_cashflow_db_mcp_server_sse" {
+	// If prefix is already the default, we don't need to create aliases
+	if prefix == DefaultToolPrefix {
 		log.Printf("Using standard prefix '%s', skipping duplicate tool registration", prefix)
 		return nil
 	}
@@ -306,9 +249,9 @@ func (tr *ToolRegistry) RegisterCursorCompatibleTools(ctx context.Context) error
 			sourceName := fmt.Sprintf("%s_%s", toolType, dbID)
 			targetName := fmt.Sprintf("%s%s_%s", prefix, dbID, toolType)
 
-			// Skip if the target name starts with cortex_ to avoid duplicates
-			if strings.HasPrefix(targetName, "cortex_") {
-				log.Printf("Skipping duplicate cortex tool alias: %s", targetName)
+			// Skip if the target name already starts with the standard prefix to avoid duplicates
+			if strings.HasPrefix(targetName, DefaultToolPrefix) {
+				log.Printf("Skipping duplicate tool alias: %s", targetName)
 				continue
 			}
 
@@ -325,15 +268,15 @@ func (tr *ToolRegistry) RegisterCursorCompatibleTools(ctx context.Context) error
 	listDbSource := "list_databases"
 	listDbTarget := fmt.Sprintf("%slist_databases", prefix)
 
-	// Skip if the target name starts with cortex_ to avoid duplicates
-	if !strings.HasPrefix(listDbTarget, "cortex_") {
+	// Skip if the target name already starts with the standard prefix to avoid duplicates
+	if !strings.HasPrefix(listDbTarget, DefaultToolPrefix) {
 		if err := tr.createToolAlias(ctx, "list_databases", listDbSource, listDbTarget); err != nil {
 			log.Printf("Warning: failed to create cursor-compatible alias for list_databases: %v", err)
 		} else {
 			log.Printf("Created cursor-compatible alias '%s' -> '%s'", listDbTarget, listDbSource)
 		}
 	} else {
-		log.Printf("Skipping duplicate cortex tool alias: %s", listDbTarget)
+		log.Printf("Skipping duplicate tool alias: %s", listDbTarget)
 	}
 
 	log.Printf("Registered cursor-compatible aliases with prefix '%s' for all tools", prefix)

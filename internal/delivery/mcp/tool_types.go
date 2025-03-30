@@ -103,15 +103,8 @@ func (t *QueryTool) HandleRequest(ctx context.Context, request server.ToolCallRe
 		return nil, err
 	}
 
-	// Format response according to MCP protocol requirements
-	return map[string]interface{}{
-		"content": []map[string]interface{}{
-			{
-				"type": "text",
-				"text": result,
-			},
-		},
-	}, nil
+	// Format response using the reusable response structure
+	return FromString(result), nil
 }
 
 //------------------------------------------------------------------------------
@@ -167,15 +160,8 @@ func (t *ExecuteTool) HandleRequest(ctx context.Context, request server.ToolCall
 		return nil, err
 	}
 
-	// Format response according to MCP protocol requirements
-	return map[string]interface{}{
-		"content": []map[string]interface{}{
-			{
-				"type": "text",
-				"text": result,
-			},
-		},
-	}, nil
+	// Format response using the reusable response structure
+	return FromString(result), nil
 }
 
 //------------------------------------------------------------------------------
@@ -255,22 +241,15 @@ func (t *TransactionTool) HandleRequest(ctx context.Context, request server.Tool
 		return nil, err
 	}
 
-	// Format response according to MCP protocol
-	response := map[string]interface{}{
-		"content": []map[string]interface{}{
-			{
-				"type": "text",
-				"text": message,
-			},
-		},
-	}
+	// Create response with text and metadata
+	resp := FromString(message)
 
 	// Add metadata if provided
-	if metadata != nil {
-		response["metadata"] = metadata
+	for k, v := range metadata {
+		resp.WithMetadata(k, v)
 	}
 
-	return response, nil
+	return resp, nil
 }
 
 //------------------------------------------------------------------------------
@@ -358,14 +337,7 @@ func (t *PerformanceTool) HandleRequest(ctx context.Context, request server.Tool
 		output += fmt.Sprintf("Threshold: %d ms\n", threshold)
 	}
 
-	return map[string]interface{}{
-		"content": []map[string]interface{}{
-			{
-				"type": "text",
-				"text": output,
-			},
-		},
-	}, nil
+	return FromString(output), nil
 }
 
 //------------------------------------------------------------------------------
@@ -406,7 +378,7 @@ func (t *SchemaTool) HandleRequest(ctx context.Context, request server.ToolCallR
 		return nil, err
 	}
 
-	// Format response according to MCP protocol
+	// Format response text
 	infoStr := fmt.Sprintf("Database Schema for %s:\n\n", dbID)
 	if schemaInfo, ok := info["schema"].(string); ok {
 		infoStr += schemaInfo
@@ -414,14 +386,7 @@ func (t *SchemaTool) HandleRequest(ctx context.Context, request server.ToolCallR
 		infoStr += fmt.Sprintf("%v", info)
 	}
 
-	return map[string]interface{}{
-		"content": []map[string]interface{}{
-			{
-				"type": "text",
-				"text": infoStr,
-			},
-		},
-	}, nil
+	return FromString(infoStr), nil
 }
 
 //------------------------------------------------------------------------------
@@ -459,7 +424,7 @@ func (t *ListDatabasesTool) CreateTool(name string, dbID string) interface{} {
 func (t *ListDatabasesTool) HandleRequest(ctx context.Context, request server.ToolCallRequest, dbID string, useCase UseCaseProvider) (interface{}, error) {
 	databases := useCase.ListDatabases()
 
-	// Format as JSON array for display
+	// Format as text for display
 	output := "Available databases:\n\n"
 	for i, db := range databases {
 		output += fmt.Sprintf("%d. %s\n", i+1, db)
@@ -469,14 +434,7 @@ func (t *ListDatabasesTool) HandleRequest(ctx context.Context, request server.To
 		output += "No databases configured.\n"
 	}
 
-	return map[string]interface{}{
-		"content": []map[string]interface{}{
-			{
-				"type": "text",
-				"text": output,
-			},
-		},
-	}, nil
+	return FromString(output), nil
 }
 
 //------------------------------------------------------------------------------

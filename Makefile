@@ -33,7 +33,7 @@ test-script:
 
 # Run tests
 test:
-	go test ./... -cover -race=1 -no-cache
+	go test ./... -race -cover -count=1
 
 # Clean build artifacts
 clean:
