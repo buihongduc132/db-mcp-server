@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/FreePeak/cortex/pkg/server"
+
+	"github.com/FreePeak/db-mcp-server/internal/usecase"
 )
 
 // ToolRegistry structure to handle tool registration
@@ -159,7 +161,7 @@ func (tr *ToolRegistry) RegisterMockTools(ctx context.Context) error {
 	log.Printf("Registering mock tools")
 
 	// For each tool type, register a mock tool
-	for toolTypeName := range tr.factory.toolTypes {
+	for toolTypeName, _ := range tr.factory.toolTypes {
 		mockToolName := fmt.Sprintf("mock_%s", toolTypeName)
 
 		toolTypeImpl, ok := tr.factory.GetToolType(toolTypeName)

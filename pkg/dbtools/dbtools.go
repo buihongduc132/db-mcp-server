@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/pkg/db"
@@ -73,33 +74,86 @@ func InitDatabase(cfg *Config) error {
 		// Read config file
 		configData, err := os.ReadFile(cfg.ConfigFile)
 		if err != nil {
-			return fmt.Errorf("failed to read config file: %w", err)
-		}
-
-		// Parse config
-		multiDBConfig = &MultiDBConfig{}
-		if err := json.Unmarshal(configData, multiDBConfig); err != nil {
-			return fmt.Errorf("failed to parse config file: %w", err)
-		}
-	} else if cfg != nil && len(cfg.Connections) > 0 {
-		// Use connections from config
-		multiDBConfig = &MultiDBConfig{
-			Connections: cfg.Connections,
-		}
-	} else {
-		// Try to load from environment variable
-		dbConfigJSON := os.Getenv("DB_CONFIG")
-		if dbConfigJSON != "" {
-			multiDBConfig = &MultiDBConfig{}
-			if err := json.Unmarshal([]byte(dbConfigJSON), multiDBConfig); err != nil {
-				return fmt.Errorf("failed to parse DB_CONFIG environment variable: %w", err)
-			}
+			log.Printf("Warning: failed to read config file %s: %v", cfg.ConfigFile, err)
+			// Don't return error, try other methods
 		} else {
-			return fmt.Errorf("no database configuration provided")
+			// Parse config
+			multiDBConfig = &MultiDBConfig{}
+			if err := json.Unmarshal(configData, multiDBConfig); err != nil {
+				log.Printf("Warning: failed to parse config file %s: %v", cfg.ConfigFile, err)
+				// Don't return error, try other methods
+			} else {
+				log.Printf("Loaded database config from file: %s", cfg.ConfigFile)
+			}
 		}
 	}
 
-	// Load configurations (multiDBConfig will always be non-nil at this point)
+	// If config was not loaded from file, try direct connections config
+	if multiDBConfig == nil || len(multiDBConfig.Connections) == 0 {
+		if cfg != nil && len(cfg.Connections) > 0 {
+			// Use connections from direct config
+			multiDBConfig = &MultiDBConfig{
+				Connections: cfg.Connections,
+			}
+			log.Printf("Using database connections from direct configuration")
+		} else {
+			// Try to load from environment variable
+			dbConfigJSON := os.Getenv("DB_CONFIG")
+			if dbConfigJSON != "" {
+				multiDBConfig = &MultiDBConfig{}
+				if err := json.Unmarshal([]byte(dbConfigJSON), multiDBConfig); err != nil {
+					log.Printf("Warning: failed to parse DB_CONFIG environment variable: %v", err)
+					// Don't return error, try legacy method
+				} else {
+					log.Printf("Loaded database config from DB_CONFIG environment variable")
+				}
+			}
+		}
+	}
+
+	// If no config loaded yet, try legacy single connection from environment
+	if multiDBConfig == nil || len(multiDBConfig.Connections) == 0 {
+		// Create a single connection from environment variables
+		dbType := os.Getenv("DB_TYPE")
+		if dbType == "" {
+			dbType = "mysql" // Default type
+		}
+
+		dbHost := os.Getenv("DB_HOST")
+		dbPortStr := os.Getenv("DB_PORT")
+		dbUser := os.Getenv("DB_USER")
+		dbPassword := os.Getenv("DB_PASSWORD")
+		dbName := os.Getenv("DB_NAME")
+
+		// If we have basic connection details, create a config
+		if dbHost != "" && dbUser != "" {
+			dbPort, _ := strconv.Atoi(dbPortStr)
+			if dbPort == 0 {
+				dbPort = 3306 // Default MySQL port
+			}
+
+			multiDBConfig = &MultiDBConfig{
+				Connections: []ConnectionConfig{
+					{
+						ID:       "default",
+						Type:     DatabaseType(dbType),
+						Host:     dbHost,
+						Port:     dbPort,
+						Name:     dbName,
+						User:     dbUser,
+						Password: dbPassword,
+					},
+				},
+			}
+			log.Printf("Created database config from environment variables")
+		}
+	}
+
+	// If still no config, return error
+	if multiDBConfig == nil || len(multiDBConfig.Connections) == 0 {
+		return fmt.Errorf("no database configuration provided")
+	}
+
 	// Convert config to JSON for loading
 	configJSON, err := json.Marshal(multiDBConfig)
 	if err != nil {
@@ -198,9 +252,14 @@ func RegisterDatabaseTools(registry *tools.Registry) error {
 					"type":        "string",
 					"description": "Database name to explore (optional, leave empty for all databases)",
 				},
+				"component": map[string]interface{}{
+					"type":        "string",
+					"description": "Component to explore (tables, columns, indices, or all)",
+					"enum":        []string{"tables", "columns", "indices", "all"},
+				},
 				"table": map[string]interface{}{
 					"type":        "string",
-					"description": "Table name to explore (optional, leave empty for all tables)",
+					"description": "Specific table to explore (optional)",
 				},
 			},
 		},
@@ -210,7 +269,7 @@ func RegisterDatabaseTools(registry *tools.Registry) error {
 	// Register query tool
 	registry.RegisterTool(&tools.Tool{
 		Name:        "dbQuery",
-		Description: "Execute a database query that returns results",
+		Description: "Execute SQL query and return results",
 		InputSchema: tools.ToolInputSchema{
 			Type: "object",
 			Properties: map[string]interface{}{
@@ -299,49 +358,40 @@ func RegisterDatabaseTools(registry *tools.Registry) error {
 	// Register query builder tool
 	registry.RegisterTool(&tools.Tool{
 		Name:        "dbQueryBuilder",
-		Description: "Build and execute a query using an object-oriented approach",
+		Description: "Build SQL queries visually",
 		InputSchema: tools.ToolInputSchema{
 			Type: "object",
 			Properties: map[string]interface{}{
+				"action": map[string]interface{}{
+					"type":        "string",
+					"description": "Action to perform (build, validate, format)",
+					"enum":        []string{"build", "validate", "format"},
+				},
+				"query": map[string]interface{}{
+					"type":        "string",
+					"description": "SQL query to validate or format",
+				},
 				"database": map[string]interface{}{
 					"type":        "string",
-					"description": "Database ID to query",
+					"description": "Database ID to use for validation",
 				},
-				"table": map[string]interface{}{
-					"type":        "string",
-					"description": "Table name to query",
-				},
-				"select": map[string]interface{}{
-					"type":        "array",
-					"description": "Columns to select",
-					"items": map[string]interface{}{
-						"type": "string",
-					},
-				},
-				"where": map[string]interface{}{
+				"components": map[string]interface{}{
 					"type":        "object",
-					"description": "Where conditions",
-				},
-				"orderBy": map[string]interface{}{
-					"type":        "array",
-					"description": "Order by columns",
-					"items": map[string]interface{}{
-						"type": "string",
-					},
-				},
-				"limit": map[string]interface{}{
-					"type":        "integer",
-					"description": "Limit results",
-				},
-				"offset": map[string]interface{}{
-					"type":        "integer",
-					"description": "Offset results",
+					"description": "Query components (for build action)",
 				},
 			},
-			Required: []string{"database", "table"},
+			Required: []string{"action"},
 		},
-		Handler: handleQueryBuilder,
+		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+			// Just a placeholder for now
+			action := params["action"].(string)
+			return fmt.Sprintf("Query builder %s action not implemented yet", action), nil
+		},
 	})
+
+	// Register Cursor-compatible tool handlers
+	// TODO: Implement or import this function
+	// tools.RegisterCursorCompatibleToolHandlers(registry)
 
 	return nil
 }

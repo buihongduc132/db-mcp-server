@@ -61,15 +61,33 @@ type ToolExecutionOptions struct {
 
 // Registry is a registry of tools
 type Registry struct {
-	tools map[string]*Tool
 	mu    sync.RWMutex
+	tools map[string]*Tool
 }
 
-// NewRegistry creates a new tool registry
+// Global registry instance for the application
+var globalRegistry *Registry
+var globalRegistryMu sync.RWMutex
+
+// NewRegistry creates a new registry
 func NewRegistry() *Registry {
-	return &Registry{
+	r := &Registry{
 		tools: make(map[string]*Tool),
 	}
+
+	// Store the registry instance globally
+	globalRegistryMu.Lock()
+	globalRegistry = r
+	globalRegistryMu.Unlock()
+
+	return r
+}
+
+// GetRegistry returns the global registry instance
+func GetRegistry() *Registry {
+	globalRegistryMu.RLock()
+	defer globalRegistryMu.RUnlock()
+	return globalRegistry
 }
 
 // RegisterTool registers a tool with the registry
@@ -77,9 +95,15 @@ func (r *Registry) RegisterTool(tool *Tool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Set creation time if not already set
-	if tool.CreatedAt.IsZero() {
-		tool.CreatedAt = time.Now()
+	// Validate tool
+	if tool.Name == "" {
+		fmt.Printf("Warning: Tool has empty name, not registering\n")
+		return
+	}
+
+	// Check for duplicate tool names
+	if _, exists := r.tools[tool.Name]; exists {
+		fmt.Printf("Warning: Tool '%s' already registered, overwriting\n", tool.Name)
 	}
 
 	r.tools[tool.Name] = tool
@@ -98,12 +122,13 @@ func (r *Registry) DeregisterTool(name string) bool {
 	return false
 }
 
-// GetTool gets a tool by name
+// GetTool returns a tool by name
 func (r *Registry) GetTool(name string) (*Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	tool, ok := r.tools[name]
-	return tool, ok
+
+	tool, exists := r.tools[name]
+	return tool, exists
 }
 
 // GetAllTools returns all registered tools
@@ -132,23 +157,49 @@ func (r *Registry) GetToolsByCategory(category string) []*Tool {
 	return tools
 }
 
-// ExecuteTool executes a tool with the given name and parameters
-func (r *Registry) ExecuteTool(ctx context.Context, name string, params map[string]interface{}) (interface{}, error) {
-	tool, ok := r.GetTool(name)
-	if !ok {
+// PrintTools prints all registered tools for debugging
+func (r *Registry) PrintTools() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	fmt.Println("Registered tools:")
+	for name, tool := range r.tools {
+		fmt.Printf("- %s: %s\n", name, tool.Description)
+	}
+}
+
+// Execute executes a tool by name with the given parameters
+func (r *Registry) Execute(ctx context.Context, name string, params map[string]interface{}, opts *ToolExecutionOptions) (interface{}, error) {
+	tool, exists := r.GetTool(name)
+	if !exists {
 		return nil, fmt.Errorf("tool not found: %s", name)
 	}
 
-	// Execute with context
-	return tool.Handler(ctx, params)
-}
+	// Validate parameters against schema
+	// This is skipped for now to keep things simple
 
-// ExecuteToolWithTimeout executes a tool with timeout
-func (r *Registry) ExecuteToolWithTimeout(name string, params map[string]interface{}, timeout time.Duration) (interface{}, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	// Default options if not provided
+	if opts == nil {
+		opts = &ToolExecutionOptions{
+			Timeout: 30 * time.Second,
+		}
+	}
 
-	return r.ExecuteTool(ctx, name, params)
+	// Set default timeout if not set
+	if opts.Timeout == 0 {
+		opts.Timeout = 30 * time.Second
+	}
+
+	// Create a context with timeout if not a background context
+	timeoutCtx := ctx
+	if opts.Timeout > 0 {
+		var cancel context.CancelFunc
+		timeoutCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		defer cancel()
+	}
+
+	// Execute tool handler
+	return tool.Handler(timeoutCtx, params)
 }
 
 // ValidateToolInput validates the input parameters against the tool's schema

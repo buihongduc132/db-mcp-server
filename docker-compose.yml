@@ -1,38 +1,48 @@
-version: '3.8'
+version: '3'
 
 services:
-  mcp-server:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  db-mcp-server:
+    build: .
     ports:
-      - "9090:9090"
+      - "9092:9092"
     environment:
-      - SERVER_PORT=9090
+      - SERVER_PORT=9092
       - TRANSPORT_MODE=sse
-      - DB_TYPE=mysql
-      - DB_HOST=db
-      - DB_PORT=3306
-      - DB_USER=mcp_user
-      - DB_PASSWORD=mcp_password
-      - DB_NAME=mcp_db
-      - LOG_LEVEL=info
-    depends_on:
-      - db
-    restart: unless-stopped
-
-  db:
-    image: mysql:8.0
-    ports:
-      - "3306:3306"
-    environment:
-      - MYSQL_ROOT_PASSWORD=root_password
-      - MYSQL_DATABASE=mcp_db
-      - MYSQL_USER=mcp_user
-      - MYSQL_PASSWORD=mcp_password
+      - DB_CONFIG_FILE=/app/config.json
+      - MCP_TOOL_PREFIX=mcp_cashflow_db_mcp_server_sse
     volumes:
-      - mysql_data:/var/lib/mysql
-    restart: unless-stopped
+      - ./config.json:/app/config.json
+      - ./.env:/app/.env
+    depends_on:
+      - mysql1
+      - mysql2
+
+  mysql1:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: db1
+      MYSQL_USER: user1
+      MYSQL_PASSWORD: password1
+    ports:
+      - "13306:3306"
+    volumes:
+      - mysql1_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+
+  mysql2:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: db2
+      MYSQL_USER: user2
+      MYSQL_PASSWORD: password2
+    ports:
+      - "13307:3306"
+    volumes:
+      - mysql2_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
 
 volumes:
-  mysql_data: 
+  mysql1_data:
+  mysql2_data: 

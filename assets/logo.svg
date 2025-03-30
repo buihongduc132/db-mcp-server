@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="240" height="120" viewBox="0 0 240 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a1a2e" />
+      <stop offset="100%" stop-color="#121420" />
+    </linearGradient>
+    <linearGradient id="accentGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4da6ff" />
+      <stop offset="100%" stop-color="#2c79ff" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="240" height="120" rx="12" fill="url(#bgGradient)" />
+  
+  <!-- Database Cylinders -->
+  <g transform="translate(45, 30)">
+    <!-- DB 1 -->
+    <ellipse cx="25" cy="15" rx="12" ry="6" fill="#2c3e50" stroke="#4da6ff" stroke-width="1.5" />
+    <rect x="13" y="15" width="24" height="20" fill="#2c3e50" stroke="#4da6ff" stroke-width="1.5" />
+    <ellipse cx="25" cy="35" rx="12" ry="6" fill="#2c3e50" stroke="#4da6ff" stroke-width="1.5" />
+    
+    <!-- DB 2 (offset) -->
+    <ellipse cx="75" cy="15" rx="12" ry="6" fill="#2c3e50" stroke="#4da6ff" stroke-width="1.5" />
+    <rect x="63" y="15" width="24" height="20" fill="#2c3e50" stroke="#4da6ff" stroke-width="1.5" />
+    <ellipse cx="75" cy="35" rx="12" ry="6" fill="#2c3e50" stroke="#4da6ff" stroke-width="1.5" />
+    
+    <!-- DB 3 (offset) -->
+    <ellipse cx="125" cy="15" rx="12" ry="6" fill="#2c3e50" stroke="#4da6ff" stroke-width="1.5" />
+    <rect x="113" y="15" width="24" height="20" fill="#2c3e50" stroke="#4da6ff" stroke-width="1.5" />
+    <ellipse cx="125" cy="35" rx="12" ry="6" fill="#2c3e50" stroke="#4da6ff" stroke-width="1.5" />
+  </g>
+
+  <!-- Connection Hub -->
+  <circle cx="120" cy="75" r="15" fill="#2c3e50" stroke="url(#accentGradient)" stroke-width="2" />
+  
+  <!-- Connection Lines -->
+  <path d="M70 57 L110 68" stroke="url(#accentGradient)" stroke-width="1.5" stroke-linecap="round" />
+  <path d="M120 60 L120 68" stroke="url(#accentGradient)" stroke-width="1.5" stroke-linecap="round" />
+  <path d="M170 57 L130 68" stroke="url(#accentGradient)" stroke-width="1.5" stroke-linecap="round" />
+  
+  <!-- Pulse Effect -->
+  <circle cx="120" cy="75" r="8" fill="none" stroke="#4da6ff" stroke-width="1" opacity="0.5">
+    <animate attributeName="r" from="8" to="15" dur="1.5s" begin="0s" repeatCount="indefinite" />
+    <animate attributeName="opacity" from="0.5" to="0" dur="1.5s" begin="0s" repeatCount="indefinite" />
+  </circle>
+
+  <!-- Circuit Board Pattern -->
+  <path d="M20 10 L30 10 L30 20" stroke="#303340" stroke-width="1" fill="none" />
+  <path d="M220 10 L210 10 L210 20" stroke="#303340" stroke-width="1" fill="none" />
+  <path d="M20 110 L30 110 L30 100" stroke="#303340" stroke-width="1" fill="none" />
+  <path d="M220 110 L210 110 L210 100" stroke="#303340" stroke-width="1" fill="none" />
+  
+  <!-- More Circuit Paths -->
+  <path d="M10 60 L20 60 L20 70 L30 70" stroke="#303340" stroke-width="1" fill="none" />
+  <path d="M230 60 L220 60 L220 70 L210 70" stroke="#303340" stroke-width="1" fill="none" />
+  
+  <!-- Accent Points -->
+  <circle cx="20" cy="10" r="1.5" fill="#4da6ff" />
+  <circle cx="220" cy="10" r="1.5" fill="#4da6ff" />
+  <circle cx="20" cy="110" r="1.5" fill="#4da6ff" />
+  <circle cx="220" cy="110" r="1.5" fill="#4da6ff" />
+  <circle cx="10" cy="60" r="1.5" fill="#4da6ff" />
+  <circle cx="30" cy="70" r="1.5" fill="#4da6ff" />
+  <circle cx="230" cy="60" r="1.5" fill="#4da6ff" />
+  <circle cx="210" cy="70" r="1.5" fill="#4da6ff" />
+</svg> 

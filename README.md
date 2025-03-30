@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.svg" alt="DB MCP Server Logo" width="300" />
+
 # Multi Database MCP Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -15,7 +17,7 @@ A Clean Architecture implementation of a database server for [Model Context Prot
 
 ## Overview
 
-The DB MCP Server provides a standardized way for AI models to interact with databases, enabling them to execute SQL queries, manage transactions, explore schemas, and analyze performance across different database systems at the same time. Built on [mark3labs/mcp-go](https://github.com/mark3labs/mcp-go) framework, it follows Clean Architecture principles for maintainability and testability.
+The DB MCP Server provides a standardized way for AI models to interact with databases, enabling them to execute SQL queries, manage transactions, explore schemas, and analyze performance across different database systems at the same time. Built on [FreePeak/cortex](https://github.com/FreePeak/cortex) framework, it follows Clean Architecture principles for maintainability and testability.
 
 ## Features
 
@@ -123,6 +125,73 @@ The key advantage of DB MCP Server is the ability to connect to multiple databas
 ```
 
 Each database connection has a unique ID that is used to reference it when using database tools.
+
+## Dynamic Database Tools
+
+The DB MCP Server can dynamically generate database tools based on your database configuration. Instead of hardcoding tool names, the server will create tools with appropriate names based on the databases defined in your configuration.
+
+### How It Works
+
+1. The server reads database connections from:
+   - Configuration file specified with `-c` or `-config` flags
+   - Direct JSON configuration via `-db-config` flag
+   - Environment variable `DB_CONFIG`
+   - Individual environment variables (`DB_HOST`, `DB_PORT`, etc.)
+
+2. For each database connection, the server automatically generates the following tools:
+   - `query_<dbID>` - Execute SQL queries
+   - `execute_<dbID>` - Execute SQL statements (INSERT, UPDATE, DELETE)
+   - `transaction_<dbID>` - Manage database transactions
+   - `performance_<dbID>` - Analyze query performance
+   - `schema_<dbID>` - Get database schema information
+
+3. Cursor-compatible aliases are also generated with the format:
+   - `mcp_cashflow_db_mcp_server_sse_query_<dbID>`
+   - `mcp_cashflow_db_mcp_server_sse_execute_<dbID>`
+   - And so on...
+
+### Configuration Example
+
+Define multiple databases in `config.json`:
+
+```json
+{
+  "connections": [
+    {
+      "id": "db1",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 3306,
+      "name": "database1",
+      "user": "user1",
+      "password": "password1"
+    },
+    {
+      "id": "db2",
+      "type": "mysql",
+      "host": "localhost",
+      "port": 3307,
+      "name": "database2",
+      "user": "user2",
+      "password": "password2"
+    }
+  ]
+}
+```
+
+With this configuration, the server will automatically generate tools like:
+- `query_db1`, `execute_db1`, `transaction_db1`, etc.
+- `query_db2`, `execute_db2`, `transaction_db2`, etc.
+
+### Command-Line Configuration
+
+You can also provide database configuration directly via command line:
+
+```bash
+./db-mcp-server -db-config '{"connections":[{"id":"mydb","type":"mysql","host":"localhost","port":3306,"name":"mydb","user":"root","password":"password"}]}'
+```
+
+This will generate tools like `query_mydb`, `execute_mydb`, etc.
 
 ## Usage
 
@@ -251,20 +320,178 @@ alt="Buy Me A Coffee"/>
 
 ### Dependencies
 
-This project has a dependency on `github.com/mark3labs/mcp-go` which requires Go 1.23 in its go.mod file. Since Go 1.23 is not yet released, we use a local patched version in the `hack/mcp-go` directory for development and CI. The GitHub Actions workflow automatically sets this up.
-
-For local development, you can:
+This project has a dependency on `github.com/FreePeak/cortex` which can be installed using the standard Go module system:
 
 ```bash
-# Clone the dependency and fix the Go version
-mkdir -p hack/mcp-go
-git clone https://github.com/mark3labs/mcp-go.git hack/mcp-go
-cd hack/mcp-go
-sed -i 's/go 1.23/go 1.22/' go.mod  # Use 's/go 1.23/go 1.22/' for macOS
-cd ../..
-
-# Update your go.mod to use the local copy
-go mod edit -go=1.22
-go mod edit -replace=github.com/mark3labs/mcp-go=./hack/mcp-go
+# Ensure the dependency is installed
+go get github.com/FreePeak/cortex@v1.0.1
 go mod tidy
 ```
+
+# Database MCP Server
+
+This server provides database tools for Cursor via the MCP (MultiLLM Communication Protocol).
+
+## Features
+
+- Execute SQL queries across multiple databases
+- Execute statements (INSERT, UPDATE, DELETE)
+- Manage transactions
+- Analyze query performance
+- Explore database schema
+- List available databases
+
+## Setup
+
+1. Build the server:
+   ```
+   make build
+   ```
+
+2. Configure your database connections in `config.json`:
+   ```json
+   {
+     "connections": [
+       {
+         "id": "mysql1",
+         "type": "mysql",
+         "host": "localhost",
+         "port": 3306,
+         "name": "db1",
+         "user": "user",
+         "password": "password"
+       },
+       {
+         "id": "mysql2",
+         "type": "mysql",
+         "host": "localhost",
+         "port": 3307,
+         "name": "db3",
+         "user": "user",
+         "password": "password"
+       }
+     ]
+   }
+   ```
+
+3. Start the server:
+   ```
+   ./restart-mcp.sh
+   ```
+
+4. Start the Cursor compatibility server (if needed):
+   ```
+   ./run-cursor-compat.sh
+   ```
+
+5. Test the tools:
+   ```
+   ./test-tools.sh
+   ```
+
+## Architecture
+
+The server follows Clean Architecture principles:
+
+- **cmd/server/main.go**: Entry point and HTTP handlers
+- **internal/delivery/mcp**: Tool registration and handlers
+- **internal/usecase**: Business logic
+- **internal/repository**: Data access
+- **pkg/dbtools**: Database utilities
+
+## Tools Available in Cursor
+
+The following tools are available for use in Cursor:
+
+- `mcp_cashflow_db_mcp_server_sse_list_databases`: List all available databases
+- `mcp_cashflow_db_mcp_server_sse_query_mysql1`: Execute SQL query on mysql1 database
+- `mcp_cashflow_db_mcp_server_sse_query_mysql2`: Execute SQL query on mysql2 database
+- `mcp_cashflow_db_mcp_server_sse_execute_mysql1`: Execute SQL statement on mysql1 database
+- `mcp_cashflow_db_mcp_server_sse_execute_mysql2`: Execute SQL statement on mysql2 database
+- `mcp_cashflow_db_mcp_server_sse_schema_mysql1`: Get schema of mysql1 database
+- `mcp_cashflow_db_mcp_server_sse_schema_mysql2`: Get schema of mysql2 database
+- `mcp_cashflow_db_mcp_server_sse_transaction_mysql1`: Manage transactions on mysql1 database
+- `mcp_cashflow_db_mcp_server_sse_transaction_mysql2`: Manage transactions on mysql2 database
+- `mcp_cashflow_db_mcp_server_sse_performance_mysql1`: Analyze query performance on mysql1 database
+- `mcp_cashflow_db_mcp_server_sse_performance_mysql2`: Analyze query performance on mysql2 database
+
+## Using with Cursor
+
+### List Databases
+```json
+{
+  "random_string": "dummy"
+}
+```
+
+### Query Database
+```json
+{
+  "query": "SELECT * FROM users LIMIT 10",
+  "params": ["param1", "param2"]
+}
+```
+
+### Execute Statement
+```json
+{
+  "statement": "INSERT INTO users (name, email) VALUES (?, ?)",
+  "params": ["John Doe", "john@example.com"]
+}
+```
+
+### Get Schema
+```json
+{
+  "random_string": "dummy"
+}
+```
+
+### Transaction Management
+```json
+// Begin transaction
+{
+  "action": "begin",
+  "readOnly": false
+}
+
+// Execute in transaction
+{
+  "action": "execute",
+  "transactionId": "tx_id_from_begin",
+  "statement": "INSERT INTO users (name) VALUES (?)",
+  "params": ["Alice"]
+}
+
+// Commit transaction
+{
+  "action": "commit",
+  "transactionId": "tx_id_from_begin"
+}
+
+// Rollback transaction
+{
+  "action": "rollback",
+  "transactionId": "tx_id_from_begin"
+}
+```
+
+### Performance Analysis
+```json
+{
+  "action": "getSlowQueries",
+  "limit": 10
+}
+```
+
+## Common Issues
+
+1. **Invalid session ID**: Make sure the Cursor compatibility server is running on port 9093.
+2. **Unknown tool**: Check the tool name prefix and ensure the server is running.
+3. **Connection errors**: Verify your database connection settings in config.json.
+
+## Troubleshooting
+
+1. Check the logs in the `logs` directory
+2. Run the test script: `./test-tools.sh`
+3. Stop all servers and restart using the provided scripts

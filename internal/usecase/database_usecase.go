@@ -26,6 +26,76 @@ func (uc *DatabaseUseCase) ListDatabases() []string {
 	return uc.repo.ListDatabases()
 }
 
+// GetDatabaseInfo returns information about a database
+func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{}, error) {
+	// Get database connection
+	db, err := uc.repo.GetDatabase(dbID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database: %w", err)
+	}
+
+	// Query for tables
+	ctx := context.Background()
+	var result map[string]interface{}
+
+	// Different queries for different database types
+	// For MySQL
+	query := "SELECT table_name, table_type, engine, table_rows, create_time FROM information_schema.tables WHERE table_schema = DATABASE()"
+	rows, err := db.Query(ctx, query)
+	if err != nil {
+		// Fallback to a simpler query
+		query = "SHOW TABLES"
+		rows, err = db.Query(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get schema information: %w", err)
+		}
+	}
+	defer rows.Close()
+
+	// Process results
+	tables := []map[string]interface{}{}
+	columns, _ := rows.Columns()
+
+	// Prepare for scanning
+	values := make([]interface{}, len(columns))
+	valuePtrs := make([]interface{}, len(columns))
+	for i := range columns {
+		valuePtrs[i] = &values[i]
+	}
+
+	// Process each row
+	for rows.Next() {
+		if err := rows.Scan(valuePtrs...); err != nil {
+			continue
+		}
+
+		// Convert to map
+		tableInfo := make(map[string]interface{})
+		for i, colName := range columns {
+			val := values[i]
+			if val == nil {
+				tableInfo[colName] = nil
+			} else {
+				switch v := val.(type) {
+				case []byte:
+					tableInfo[colName] = string(v)
+				default:
+					tableInfo[colName] = v
+				}
+			}
+		}
+		tables = append(tables, tableInfo)
+	}
+
+	// Create result
+	result = map[string]interface{}{
+		"database": dbID,
+		"tables":   tables,
+	}
+
+	return result, nil
+}
+
 // ExecuteQuery executes a SQL query and returns the formatted results
 func (uc *DatabaseUseCase) ExecuteQuery(ctx context.Context, dbID, query string, params []interface{}) (string, error) {
 	db, err := uc.repo.GetDatabase(dbID)

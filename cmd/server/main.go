@@ -5,13 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/FreePeak/cortex/pkg/server"
 
 	"github.com/FreePeak/db-mcp-server/internal/config"
 	"github.com/FreePeak/db-mcp-server/internal/delivery/mcp"
@@ -23,20 +22,33 @@ import (
 func main() {
 	// Parse command-line arguments
 	configFile := flag.String("c", "config.json", "Database configuration file")
+	configPath := flag.String("config", "config.json", "Database configuration file (alternative)")
 	transportMode := flag.String("t", "sse", "Transport mode (stdio or sse)")
 	serverPort := flag.Int("p", 9092, "Server port for SSE transport")
 	serverHost := flag.String("h", "localhost", "Server host for SSE transport")
+	dbConfigJson := flag.String("db-config", "", "JSON string with database configuration")
 	flag.Parse()
 
+	// Prioritize flags with actual values
+	finalConfigPath := *configFile
+	if finalConfigPath == "config.json" && *configPath != "config.json" {
+		finalConfigPath = *configPath
+	}
+
+	finalServerPort := *serverPort
 	// Set environment variables from command line arguments if provided
-	if *configFile != "config.json" {
-		os.Setenv("CONFIG_PATH", *configFile)
+	if finalConfigPath != "config.json" {
+		os.Setenv("CONFIG_PATH", finalConfigPath)
 	}
 	if *transportMode != "sse" {
 		os.Setenv("TRANSPORT_MODE", *transportMode)
 	}
-	if *serverPort != 9092 {
-		os.Setenv("SERVER_PORT", fmt.Sprintf("%d", *serverPort))
+	if finalServerPort != 9092 {
+		os.Setenv("SERVER_PORT", fmt.Sprintf("%d", finalServerPort))
+	}
+	// Set DB_CONFIG environment variable if provided via flag
+	if *dbConfigJson != "" {
+		os.Setenv("DB_CONFIG", *dbConfigJson)
 	}
 
 	// Load configuration after environment variables are set
@@ -45,14 +57,19 @@ func main() {
 		log.Printf("Warning: Failed to load configuration: %v", err)
 		// Create a default config if loading fails
 		cfg = &config.Config{
-			ServerPort:    *serverPort,
+			ServerPort:    finalServerPort,
 			TransportMode: *transportMode,
-			ConfigPath:    *configFile,
+			ConfigPath:    finalConfigPath,
 		}
-	} // Initialize database connection from config
+	}
+
+	// Initialize database connection from config
 	dbConfig := &dbtools.Config{
 		ConfigFile: cfg.ConfigPath,
 	}
+
+	// Ensure database configuration exists
+	log.Printf("Using database configuration from: %s", cfg.ConfigPath)
 
 	// Try to initialize database from config
 	if err := dbtools.InitDatabase(dbConfig); err != nil {
@@ -72,21 +89,56 @@ func main() {
 	// Set up Clean Architecture layers
 	dbRepo := repository.NewDatabaseRepository()
 	dbUseCase := usecase.NewDatabaseUseCase(dbRepo)
-	toolRegistry := mcp.NewToolRegistry(mcpServer, dbUseCase)
+	toolRegistry := mcp.NewToolRegistry(mcpServer)
+
+	// Set the database use case in the tool registry
+	ctx := context.Background()
 
 	// Debug log: Check database connections before registering tools
 	dbIDs := dbUseCase.ListDatabases()
-	log.Printf("Available database connections before registering tools: %v", dbIDs)
+	if len(dbIDs) > 0 {
+		log.Printf("Detected %d database connections: %v", len(dbIDs), dbIDs)
+		log.Printf("Will dynamically generate database tools for each connection")
+	} else {
+		log.Printf("No database connections detected")
+	}
 
 	// Register tools
-	toolRegistry.RegisterAllTools()
+	if err := toolRegistry.RegisterAllTools(ctx, dbUseCase); err != nil {
+		log.Printf("Warning: error registering tools: %v", err)
+	}
 	log.Printf("Finished registering tools")
+
+	// If we have databases, display the available tools
+	if len(dbIDs) > 0 {
+		log.Printf("Available database tools:")
+		for _, dbID := range dbIDs {
+			log.Printf("  Database %s:", dbID)
+			log.Printf("    - query_%s: Execute SQL queries", dbID)
+			log.Printf("    - execute_%s: Execute SQL statements", dbID)
+			log.Printf("    - transaction_%s: Manage transactions", dbID)
+			log.Printf("    - performance_%s: Analyze query performance", dbID)
+			log.Printf("    - schema_%s: Get database schema", dbID)
+		}
+		log.Printf("  Common tools:")
+		log.Printf("    - list_databases: List all available databases")
+	}
 
 	// If no database connections, register mock tools to ensure at least some tools are available
 	if len(dbIDs) == 0 {
 		log.Printf("No database connections available. Adding mock tools...")
-		toolRegistry.RegisterMockTools()
+		if err := toolRegistry.RegisterMockTools(ctx); err != nil {
+			log.Printf("Warning: error registering mock tools: %v", err)
+		}
 	}
+
+	// Create a session store to track valid sessions
+	sessions := make(map[string]bool)
+
+	// Create a default session for easier testing
+	defaultSessionID := "default-session"
+	sessions[defaultSessionID] = true
+	log.Printf("Created default session: %s", defaultSessionID)
 
 	// Handle transport mode
 	switch cfg.TransportMode {
@@ -104,19 +156,14 @@ func main() {
 			// This only works on Unix-like systems
 			os.Setenv("MCP_DISABLE_LOGGING", "true")
 		}
-
-		// Create SSE server with options
-		sseServer := server.NewSSEServer(
-			mcpServer,
-			server.WithBaseURL(baseURL),
-		)
-
-		log.Printf("Created SSE server, starting server...")
+		// Set the server address
+		mcpServer.SetAddress(fmt.Sprintf(":%d", cfg.ServerPort))
 
 		// Start the server
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- sseServer.Start(fmt.Sprintf(":%d", cfg.ServerPort))
+			log.Printf("Starting server...")
+			errCh <- mcpServer.ServeHTTP()
 		}()
 
 		// Wait for interrupt or error
@@ -130,9 +177,8 @@ func main() {
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer shutdownCancel()
 
-			// Shutdown HTTP server
-			server := &http.Server{Addr: fmt.Sprintf(":%d", cfg.ServerPort)}
-			if err := server.Shutdown(shutdownCtx); err != nil {
+			// Shutdown the server
+			if err := mcpServer.Shutdown(shutdownCtx); err != nil {
 				log.Printf("Error during server shutdown: %v", err)
 			}
 
@@ -153,7 +199,7 @@ func main() {
 		}
 
 		// No graceful shutdown needed for stdio
-		if err := server.ServeStdio(mcpServer); err != nil {
+		if err := mcpServer.ServeStdio(); err != nil {
 			log.Fatalf("STDIO server error: %v", err)
 		}
 

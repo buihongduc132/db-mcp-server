@@ -32,12 +32,22 @@ COPY --from=builder /app/mcp-server /app/mcp-server
 
 # Copy example .env file (can be overridden with volume mounts)
 COPY .env.example /app/.env
+COPY config.json /app/config.json
 
-# Expose the server port (default in the .env file is 9090)
+# Create data directory
+RUN mkdir -p /app/data
+
+# Set environment variables
+ENV SERVER_PORT=9090
+ENV TRANSPORT_MODE=sse
+ENV DB_CONFIG_FILE=/app/config.json
+ENV MCP_TOOL_PREFIX=mcp_cashflow_db_mcp_server_sse
+
+# Expose server port
 EXPOSE 9090
 
-# Command to run the application in SSE mode
-ENTRYPOINT ["/app/mcp-server", "-t", "sse"]
+# Start the MCP server with proper configuration
+CMD ["/app/server", "-c", "/app/config.json", "-p", "9090", "-t", "sse"]
 
 # You can override the port by passing it as a command-line argument
 # docker run -p 8080:8080 db-mcp-server -port 8080 
