@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,6 +20,36 @@ import (
 	"github.com/FreePeak/db-mcp-server/pkg/dbtools"
 )
 
+// findConfigFile attempts to find config.json in the current directory or parent directories
+func findConfigFile() string {
+	// Default config file name
+	const defaultConfigFile = "config.json"
+
+	// Check if the file exists in current directory
+	if _, err := os.Stat(defaultConfigFile); err == nil {
+		return defaultConfigFile
+	}
+
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Printf("Error getting current directory: %v", err)
+		return defaultConfigFile
+	}
+
+	// Try up to 3 parent directories
+	for i := 0; i < 3; i++ {
+		cwd = filepath.Dir(cwd)
+		configPath := filepath.Join(cwd, defaultConfigFile)
+		if _, err := os.Stat(configPath); err == nil {
+			return configPath
+		}
+	}
+
+	// Fall back to default if not found
+	return defaultConfigFile
+}
+
 func main() {
 	// Parse command-line arguments
 	configFile := flag.String("c", "config.json", "Database configuration file")
@@ -26,7 +57,7 @@ func main() {
 	transportMode := flag.String("t", "sse", "Transport mode (stdio or sse)")
 	serverPort := flag.Int("p", 9092, "Server port for SSE transport")
 	serverHost := flag.String("h", "localhost", "Server host for SSE transport")
-	dbConfigJson := flag.String("db-config", "", "JSON string with database configuration")
+	dbConfigJSON := flag.String("db-config", "", "JSON string with database configuration")
 	flag.Parse()
 
 	// Prioritize flags with actual values
@@ -35,20 +66,37 @@ func main() {
 		finalConfigPath = *configPath
 	}
 
+	// If no specific config path was provided, try to find a config file
+	if finalConfigPath == "config.json" {
+		possibleConfigPath := findConfigFile()
+		if possibleConfigPath != "config.json" {
+			log.Printf("Found config file at: %s", possibleConfigPath)
+			finalConfigPath = possibleConfigPath
+		}
+	}
+
 	finalServerPort := *serverPort
 	// Set environment variables from command line arguments if provided
 	if finalConfigPath != "config.json" {
-		os.Setenv("CONFIG_PATH", finalConfigPath)
+		if err := os.Setenv("CONFIG_PATH", finalConfigPath); err != nil {
+			log.Printf("Warning: failed to set CONFIG_PATH env: %v", err)
+		}
 	}
 	if *transportMode != "sse" {
-		os.Setenv("TRANSPORT_MODE", *transportMode)
+		if err := os.Setenv("TRANSPORT_MODE", *transportMode); err != nil {
+			log.Printf("Warning: failed to set TRANSPORT_MODE env: %v", err)
+		}
 	}
 	if finalServerPort != 9092 {
-		os.Setenv("SERVER_PORT", fmt.Sprintf("%d", finalServerPort))
+		if err := os.Setenv("SERVER_PORT", fmt.Sprintf("%d", finalServerPort)); err != nil {
+			log.Printf("Warning: failed to set SERVER_PORT env: %v", err)
+		}
 	}
 	// Set DB_CONFIG environment variable if provided via flag
-	if *dbConfigJson != "" {
-		os.Setenv("DB_CONFIG", *dbConfigJson)
+	if *dbConfigJSON != "" {
+		if err := os.Setenv("DB_CONFIG", *dbConfigJSON); err != nil {
+			log.Printf("Warning: failed to set DB_CONFIG env: %v", err)
+		}
 	}
 
 	// Load configuration after environment variables are set
@@ -158,7 +206,9 @@ func main() {
 			log.Printf("Logging in SSE transport is disabled")
 			// Redirect standard output to null device if logging is disabled
 			// This only works on Unix-like systems
-			os.Setenv("MCP_DISABLE_LOGGING", "true")
+			if err := os.Setenv("MCP_DISABLE_LOGGING", "true"); err != nil {
+				log.Printf("Warning: failed to set MCP_DISABLE_LOGGING env: %v", err)
+			}
 		}
 		// Set the server address
 		mcpServer.SetAddress(fmt.Sprintf(":%d", cfg.ServerPort))
@@ -199,7 +249,9 @@ func main() {
 		if cfg.DisableLogging {
 			log.Printf("Logging in STDIO transport is disabled")
 			// Set environment variable to signal to the MCP library to disable logging
-			os.Setenv("MCP_DISABLE_LOGGING", "true")
+			if err := os.Setenv("MCP_DISABLE_LOGGING", "true"); err != nil {
+				log.Printf("Warning: failed to set MCP_DISABLE_LOGGING env: %v", err)
+			}
 		}
 
 		// No graceful shutdown needed for stdio

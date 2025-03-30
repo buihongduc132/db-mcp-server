@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -50,7 +51,11 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 			return nil, fmt.Errorf("failed to get schema information: %w", err)
 		}
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("error closing rows: %v", closeErr)
+		}
+	}()
 
 	// Process results
 	tables := []map[string]interface{}{}
