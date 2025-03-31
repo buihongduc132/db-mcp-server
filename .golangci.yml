@@ -55,4 +55,7 @@ issues:
     - path: internal/delivery/mcp/tool_registry.go  
       text: "Error return value of `tr.createToolAlias` is not checked"
     - path: cmd/server/main.go
-      text: "Error return value of `os.Setenv` is not checked" 
+      text: "Error return value of `os.Setenv` is not checked"
+    - path: _test\.go$
+      linters:
+        - errcheck 

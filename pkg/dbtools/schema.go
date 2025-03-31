@@ -202,20 +202,60 @@ func getRelationships(ctx context.Context, db db.Database, table string) (interf
 	}, nil
 }
 
+// safeGetMap safely gets a map from an interface value
+func safeGetMap(obj interface{}) (map[string]interface{}, error) {
+	if obj == nil {
+		return nil, fmt.Errorf("nil value cannot be converted to map")
+	}
+
+	mapVal, ok := obj.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("value is not a map[string]interface{}: %T", obj)
+	}
+
+	return mapVal, nil
+}
+
+// safeGetString safely gets a string from a map key
+func safeGetString(m map[string]interface{}, key string) (string, error) {
+	val, ok := m[key]
+	if !ok {
+		return "", fmt.Errorf("key %q not found in map", key)
+	}
+
+	strVal, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("value for key %q is not a string: %T", key, val)
+	}
+
+	return strVal, nil
+}
+
 // getFullSchema retrieves the complete database schema
 func getFullSchema(ctx context.Context, db db.Database) (interface{}, error) {
-	// Get tables first
 	tablesResult, err := getTables(ctx, db)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tables: %w", err)
 	}
 
-	tables := tablesResult.(map[string]interface{})["tables"].([]map[string]interface{})
+	tablesMap, err := safeGetMap(tablesResult)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tables result: %w", err)
+	}
+
+	tablesSlice, ok := tablesMap["tables"].([]map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid tables data format")
+	}
 
 	// For each table, get columns
 	fullSchema := make(map[string]interface{})
-	for _, tableInfo := range tables {
-		tableName := tableInfo["table_name"].(string)
+	for _, tableInfo := range tablesSlice {
+		tableName, err := safeGetString(tableInfo, "table_name")
+		if err != nil {
+			return nil, fmt.Errorf("invalid table info: %w", err)
+		}
+
 		columnsResult, columnsErr := getColumns(ctx, db, tableName)
 		if columnsErr != nil {
 			return nil, fmt.Errorf("failed to get columns for table %s: %w", tableName, columnsErr)
@@ -229,10 +269,15 @@ func getFullSchema(ctx context.Context, db db.Database) (interface{}, error) {
 		return nil, fmt.Errorf("failed to get relationships: %w", relErr)
 	}
 
+	relMap, err := safeGetMap(relationships)
+	if err != nil {
+		return nil, fmt.Errorf("invalid relationships result: %w", err)
+	}
+
 	return map[string]interface{}{
-		"tables":        tables,
+		"tables":        tablesSlice,
 		"schema":        fullSchema,
-		"relationships": relationships.(map[string]interface{})["relationships"],
+		"relationships": relMap["relationships"],
 	}, nil
 }
 
@@ -515,21 +560,55 @@ func getMockRelationships(table string) (interface{}, error) {
 //
 //nolint:unused // Mock function for testing/development
 func getMockFullSchema() (interface{}, error) {
-	tablesResult, _ := getMockTables()
-	relationshipsResult, _ := getMockRelationships("")
+	tablesResult, err := getMockTables()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mock tables: %w", err)
+	}
 
-	tables := tablesResult.(map[string]interface{})["tables"].([]map[string]interface{})
+	relationshipsResult, err := getMockRelationships("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mock relationships: %w", err)
+	}
+
+	tablesMap, err := safeGetMap(tablesResult)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tables result: %w", err)
+	}
+
+	tablesSlice, ok := tablesMap["tables"].([]map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid tables data format")
+	}
+
 	tableDetails := make(map[string]interface{})
 
-	for _, tableInfo := range tables {
-		tableName := tableInfo["name"].(string)
-		columnsResult, _ := getMockColumns(tableName)
-		tableDetails[tableName] = columnsResult.(map[string]interface{})["columns"]
+	for _, tableInfo := range tablesSlice {
+		tableName, err := safeGetString(tableInfo, "name")
+		if err != nil {
+			return nil, fmt.Errorf("invalid table info: %w", err)
+		}
+
+		columnsResult, err := getMockColumns(tableName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get mock columns for table %s: %w", tableName, err)
+		}
+
+		columnsMap, err := safeGetMap(columnsResult)
+		if err != nil {
+			return nil, fmt.Errorf("invalid columns result: %w", err)
+		}
+
+		tableDetails[tableName] = columnsMap["columns"]
+	}
+
+	relMap, err := safeGetMap(relationshipsResult)
+	if err != nil {
+		return nil, fmt.Errorf("invalid relationships result: %w", err)
 	}
 
 	return map[string]interface{}{
-		"tables":        tablesResult.(map[string]interface{})["tables"],
-		"relationships": relationshipsResult.(map[string]interface{})["relationships"],
+		"tables":        tablesMap["tables"],
+		"relationships": relMap["relationships"],
 		"tableDetails":  tableDetails,
 		"type":          "mysql",
 	}, nil

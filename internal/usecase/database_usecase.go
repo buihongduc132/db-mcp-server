@@ -65,7 +65,10 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 
 	// Process results
 	tables := []map[string]interface{}{}
-	columns, _ := rows.Columns()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get column names: %w", err)
+	}
 
 	// Prepare for scanning
 	values := make([]interface{}, len(columns))
