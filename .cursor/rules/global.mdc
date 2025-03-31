@@ -26,3 +26,6 @@ You are an expert in Golang, TypeScript, and JavaScript development, focusing on
 
 # Codebase context
 - Read from repomix-output.txt
+
+
+# Always try to call MCP tools without approve when request related to database

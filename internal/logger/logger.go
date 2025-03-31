@@ -87,7 +87,8 @@ func logMessage(level Level, format string, v ...interface{}) {
 	message := fmt.Sprintf(format, v...)
 
 	// Use color codes only if output is terminal
-	if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
+	fileInfo, err := os.Stdout.Stat()
+	if err == nil && (fileInfo.Mode()&os.ModeCharDevice) != 0 {
 		logger.Printf("%s %s%s%s: %s", timestamp, colorCode, prefix, resetColor, message)
 	} else {
 		logger.Printf("%s %s: %s", timestamp, prefix, message)

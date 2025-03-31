@@ -139,8 +139,8 @@ func InitDatabase(cfg *Config) error {
 
 		// If we have basic connection details, create a config
 		if dbHost != "" && dbUser != "" {
-			dbPort, _ := strconv.Atoi(dbPortStr)
-			if dbPort == 0 {
+			dbPort, err := strconv.Atoi(dbPortStr)
+			if err != nil || dbPort == 0 {
 				dbPort = 3306 // Default MySQL port
 			}
 
@@ -396,8 +396,11 @@ func RegisterDatabaseTools(registry *tools.Registry) error {
 		},
 		Handler: func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
 			// Just a placeholder for now
-			action := params["action"].(string)
-			return fmt.Sprintf("Query builder %s action not implemented yet", action), nil
+			actionVal, ok := params["action"].(string)
+			if !ok {
+				return nil, fmt.Errorf("missing or invalid 'action' parameter")
+			}
+			return fmt.Sprintf("Query builder %s action not implemented yet", actionVal), nil
 		},
 	})
 

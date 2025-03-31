@@ -45,7 +45,10 @@ func TestLoadConfig(t *testing.T) {
 	}
 
 	// Get current working directory and handle .env file
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get current working directory: %v", err)
+	}
 	envPath := filepath.Join(cwd, ".env")
 	tempPath := filepath.Join(cwd, ".env.bak")
 

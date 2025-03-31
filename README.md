@@ -271,6 +271,25 @@ export DB_CONFIG='{"connections":[...]}'
 
 For each connected database (e.g., "mysql1", "mysql2"), the server creates:
 
+### Tool Naming Convention
+
+The server automatically generates tools with names following this format:
+
+```
+<tool_type>_<database_id>
+```
+
+Where:
+- `<tool_type>`: One of: query, execute, transaction, schema, performance
+- `<database_id>`: The ID of the database as defined in your configuration
+
+Example tool names for a database with ID "mysql1":
+- `query_mysql1`
+- `execute_mysql1`
+- `transaction_mysql1`
+- `schema_mysql1`
+- `performance_mysql1`
+
 ### Database-Specific Tools
 
 - `query_<dbid>`: Execute SQL queries on the specified database
@@ -459,3 +478,39 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 alt="Buy Me A Coffee"/>
 </a>
 </p>
+
+## Cursor Integration
+
+### Tool Naming Convention
+
+The MCP server registers tools with names that match the format Cursor expects. The tool names follow this format:
+
+```
+mcp_<servername>_<tooltype>_<dbID>
+```
+
+For example: `mcp_cashflow_db_mcp_server_stdio_schema_cashflow_db`
+
+The server uses the name `cashflow_db_mcp_server_stdio` by default, which should match your Cursor configuration in the `mcp.json` file.
+
+### Cursor Configuration
+
+In your Cursor configuration (`~/.cursor/mcp.json`), you should have a configuration like:
+
+```json
+{
+    "mcpServers": {
+        "cashflow-db-mcp-server-stdio": {
+            "command": "/path/to/db-mcp-server/server",
+            "args": [
+                "-t",
+                "stdio",
+                "-c",
+                "/path/to/database_config.json"
+            ]
+        }
+    }
+}
+```
+
+The server will automatically register tools with simple names that match the database identifiers in your configuration.

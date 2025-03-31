@@ -40,7 +40,6 @@ RUN mkdir -p /app/data /app/logs
 ENV SERVER_PORT=9092
 ENV TRANSPORT_MODE=sse
 ENV CONFIG_PATH=/app/config.json
-ENV MCP_TOOL_PREFIX=mcp_cashflow_db_mcp_server_sse_
 
 # Expose server port
 EXPOSE 9092

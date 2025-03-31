@@ -44,8 +44,17 @@ func LoadConfig() (*Config, error) {
 		log.Printf("Loaded configuration from .env file")
 	}
 
-	port, _ := strconv.Atoi(getEnv("SERVER_PORT", "9090"))
-	dbPort, _ := strconv.Atoi(getEnv("DB_PORT", "3306"))
+	port, err := strconv.Atoi(getEnv("SERVER_PORT", "9090"))
+	if err != nil {
+		log.Printf("Warning: Invalid SERVER_PORT value, using default 9090")
+		port = 9090
+	}
+
+	dbPort, err := strconv.Atoi(getEnv("DB_PORT", "3306"))
+	if err != nil {
+		log.Printf("Warning: Invalid DB_PORT value, using default 3306")
+		dbPort = 3306
+	}
 
 	// Get config path from environment or use default
 	configPath := getEnv("CONFIG_PATH", "")
