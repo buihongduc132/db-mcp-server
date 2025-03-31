@@ -2,11 +2,12 @@ package dbtools
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/FreePeak/db-mcp-server/pkg/logger"
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
@@ -101,11 +102,7 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 		if innerErr != nil {
 			return nil, fmt.Errorf("failed to execute query: %w", innerErr)
 		}
-		defer func() {
-			if closeErr := rows.Close(); closeErr != nil {
-				log.Printf("error closing rows: %v", closeErr)
-			}
-		}()
+		defer cleanupRows(rows)
 
 		// Convert rows to maps
 		results, innerErr := rowsToMaps(rows)
@@ -184,4 +181,13 @@ func handleMockQuery(ctx context.Context, params map[string]interface{}) (interf
 //nolint:unused // Retained for future use
 func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+// cleanupRows ensures rows are closed properly
+func cleanupRows(rows *sql.Rows) {
+	if rows != nil {
+		if closeErr := rows.Close(); closeErr != nil {
+			logger.Error("error closing rows: %v", closeErr)
+		}
+	}
 }

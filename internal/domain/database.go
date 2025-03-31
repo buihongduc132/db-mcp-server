@@ -110,4 +110,5 @@ type ConstraintInfo struct {
 type DatabaseRepository interface {
 	GetDatabase(id string) (Database, error)
 	ListDatabases() []string
+	GetDatabaseType(id string) (string, error)
 }

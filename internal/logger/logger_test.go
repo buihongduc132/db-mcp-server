@@ -3,18 +3,26 @@ package logger
 import (
 	"bytes"
 	"errors"
-	"log"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest"
 )
 
 // captureOutput captures log output during a test
 func captureOutput(f func()) string {
 	var buf bytes.Buffer
-	oldLogger := logger
-	logger = log.New(&buf, "", 0)
-	defer func() { logger = oldLogger }()
+
+	// Create a custom zap logger that writes to our buffer
+	encoderConfig := zap.NewDevelopmentEncoderConfig()
+	encoder := zapcore.NewConsoleEncoder(encoderConfig)
+	core := zapcore.NewCore(encoder, zapcore.AddSync(&buf), zapcore.DebugLevel)
+
+	oldLogger := zapLogger
+	zapLogger = zap.New(core)
+	defer func() { zapLogger = oldLogger }()
 
 	f()
 	return buf.String()
@@ -44,7 +52,29 @@ func TestSetLogLevel(t *testing.T) {
 	}
 }
 
+func TestZapLevelConversion(t *testing.T) {
+	tests := []struct {
+		level         Level
+		expectedLevel zapcore.Level
+	}{
+		{LevelDebug, zapcore.DebugLevel},
+		{LevelInfo, zapcore.InfoLevel},
+		{LevelWarn, zapcore.WarnLevel},
+		{LevelError, zapcore.ErrorLevel},
+	}
+
+	for _, tt := range tests {
+		t.Run(zapcore.Level(tt.expectedLevel).String(), func(t *testing.T) {
+			atomicLevel := getZapLevel(tt.level)
+			assert.Equal(t, tt.expectedLevel, atomicLevel.Level())
+		})
+	}
+}
+
 func TestDebug(t *testing.T) {
+	// Setup test logger
+	zapLogger = zaptest.NewLogger(t)
+
 	// Test when debug is enabled
 	logLevel = LevelDebug
 	output := captureOutput(func() {
@@ -62,6 +92,9 @@ func TestDebug(t *testing.T) {
 }
 
 func TestInfo(t *testing.T) {
+	// Setup test logger
+	zapLogger = zaptest.NewLogger(t)
+
 	// Test when info is enabled
 	logLevel = LevelInfo
 	output := captureOutput(func() {
@@ -79,6 +112,9 @@ func TestInfo(t *testing.T) {
 }
 
 func TestWarn(t *testing.T) {
+	// Setup test logger
+	zapLogger = zaptest.NewLogger(t)
+
 	// Test when warn is enabled
 	logLevel = LevelWarn
 	output := captureOutput(func() {
@@ -96,7 +132,10 @@ func TestWarn(t *testing.T) {
 }
 
 func TestError(t *testing.T) {
-	// Error should always be logged
+	// Setup test logger
+	zapLogger = zaptest.NewLogger(t)
+
+	// Error should always be logged when level is error
 	logLevel = LevelError
 	output := captureOutput(func() {
 		Error("Test error message: %s", "value")
@@ -106,38 +145,47 @@ func TestError(t *testing.T) {
 }
 
 func TestErrorWithStack(t *testing.T) {
+	// Setup test logger
+	zapLogger = zaptest.NewLogger(t)
+
 	err := errors.New("test error")
 	output := captureOutput(func() {
 		ErrorWithStack(err)
 	})
 	assert.Contains(t, output, "ERROR")
 	assert.Contains(t, output, "test error")
-	// Just check that some stack trace data is included
-	assert.Contains(t, output, "goroutine")
+	assert.Contains(t, output, "stack")
 }
 
-// For the Request/Response logging tests, we'll just test that the functions don't panic
-// rather than asserting the specific output format which may change
+// For the structured logging tests, we'll just test that the functions don't panic
 
 func TestRequestLog(t *testing.T) {
+	zapLogger = zaptest.NewLogger(t)
+	logLevel = LevelDebug
 	assert.NotPanics(t, func() {
 		RequestLog("POST", "/api/data", "session123", `{"key":"value"}`)
 	})
 }
 
 func TestResponseLog(t *testing.T) {
+	zapLogger = zaptest.NewLogger(t)
+	logLevel = LevelDebug
 	assert.NotPanics(t, func() {
 		ResponseLog(200, "session123", `{"result":"success"}`)
 	})
 }
 
 func TestSSEEventLog(t *testing.T) {
+	zapLogger = zaptest.NewLogger(t)
+	logLevel = LevelDebug
 	assert.NotPanics(t, func() {
 		SSEEventLog("message", "session123", `{"data":"content"}`)
 	})
 }
 
 func TestRequestResponseLog(t *testing.T) {
+	zapLogger = zaptest.NewLogger(t)
+	logLevel = LevelDebug
 	assert.NotPanics(t, func() {
 		RequestResponseLog("RPC", "session123", `{"method":"getData"}`, `{"result":"data"}`)
 	})

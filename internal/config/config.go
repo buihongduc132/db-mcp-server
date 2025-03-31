@@ -3,13 +3,13 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 
 	"github.com/joho/godotenv"
 
+	"github.com/FreePeak/db-mcp-server/internal/logger"
 	"github.com/FreePeak/db-mcp-server/pkg/db"
 )
 
@@ -36,23 +36,26 @@ type DatabaseConfig struct {
 
 // LoadConfig loads the configuration from environment variables and optional JSON config
 func LoadConfig() (*Config, error) {
+	// Initialize logger with default level first to avoid nil pointer
+	logger.Initialize("info")
+
 	// Load .env file if it exists
 	err := godotenv.Load()
 	if err != nil {
-		log.Printf("Warning: .env file not found, using environment variables only")
+		logger.Info("Warning: .env file not found, using environment variables only")
 	} else {
-		log.Printf("Loaded configuration from .env file")
+		logger.Info("Loaded configuration from .env file")
 	}
 
 	port, err := strconv.Atoi(getEnv("SERVER_PORT", "9090"))
 	if err != nil {
-		log.Printf("Warning: Invalid SERVER_PORT value, using default 9090")
+		logger.Warn("Warning: Invalid SERVER_PORT value, using default 9090")
 		port = 9090
 	}
 
 	dbPort, err := strconv.Atoi(getEnv("DB_PORT", "3306"))
 	if err != nil {
-		log.Printf("Warning: Invalid DB_PORT value, using default 3306")
+		logger.Warn("Warning: Invalid DB_PORT value, using default 3306")
 		dbPort = 3306
 	}
 
@@ -66,7 +69,7 @@ func LoadConfig() (*Config, error) {
 	if !filepath.IsAbs(configPath) {
 		absPath, err := filepath.Abs(configPath)
 		if err != nil {
-			log.Printf("Warning: Could not resolve absolute path for config file: %v", err)
+			logger.Warn("Warning: Could not resolve absolute path for config file: %v", err)
 		} else {
 			configPath = absPath
 		}
@@ -96,7 +99,7 @@ func LoadConfig() (*Config, error) {
 
 	// Try to load multi-database configuration from JSON file
 	if _, err := os.Stat(config.ConfigPath); err == nil {
-		log.Printf("Loading configuration from: %s", config.ConfigPath)
+		logger.Info("Loading configuration from: %s", config.ConfigPath)
 		configData, err := os.ReadFile(config.ConfigPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read config file %s: %w", config.ConfigPath, err)
@@ -109,7 +112,7 @@ func LoadConfig() (*Config, error) {
 
 		config.MultiDBConfig = &multiDBConfig
 	} else {
-		log.Printf("Warning: Config file not found at %s, using environment variables", config.ConfigPath)
+		logger.Info("Warning: Config file not found at %s, using environment variables", config.ConfigPath)
 		// If no JSON config found, create a single connection config from environment variables
 		config.MultiDBConfig = &db.MultiDBConfig{
 			Connections: []db.DatabaseConnectionConfig{

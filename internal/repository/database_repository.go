@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	"github.com/FreePeak/db-mcp-server/internal/domain"
 	"github.com/FreePeak/db-mcp-server/pkg/dbtools"
@@ -34,6 +35,22 @@ func (r *DatabaseRepository) GetDatabase(id string) (domain.Database, error) {
 // ListDatabases returns a list of available database IDs
 func (r *DatabaseRepository) ListDatabases() []string {
 	return dbtools.ListDatabases()
+}
+
+// GetDatabaseType returns the type of a database by ID
+func (r *DatabaseRepository) GetDatabaseType(id string) (string, error) {
+	// Simple approach - infer type from database ID
+	// This is a temporary solution until we have a proper way to get the connection info
+	switch {
+	case strings.HasPrefix(id, "postgres"):
+		return "postgres", nil
+	case strings.HasPrefix(id, "mysql"):
+		return "mysql", nil
+	default:
+		// For unknown types, we can try to execute a database-specific query
+		// to identify the type, but for now we'll default to mysql
+		return "mysql", nil
+	}
 }
 
 // DatabaseAdapter adapts the db.Database to the domain.Database interface

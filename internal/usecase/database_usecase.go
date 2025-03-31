@@ -3,11 +3,11 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/internal/domain"
+	"github.com/FreePeak/db-mcp-server/internal/logger"
 )
 
 // TODO: Improve error handling with custom error types and better error messages
@@ -41,25 +41,42 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
 
+	// Get the database type
+	dbType, err := uc.repo.GetDatabaseType(dbID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database type: %w", err)
+	}
+
 	// Query for tables
 	ctx := context.Background()
-	var result map[string]interface{}
 
-	// Different queries for different database types
-	// For MySQL
-	query := "SELECT table_name, table_type, engine, table_rows, create_time FROM information_schema.tables WHERE table_schema = DATABASE()"
-	rows, err := db.Query(ctx, query)
-	if err != nil {
-		// Fallback to a simpler query
-		query = "SHOW TABLES"
+	// Different handling based on database type
+	var rows domain.Rows
+
+	if dbType == "postgres" {
+		// For PostgreSQL, use pg_catalog which is safer
+		query := "SELECT tablename AS table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
 		rows, err = db.Query(ctx, query)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get schema information: %w", err)
 		}
+	} else {
+		// For MySQL
+		query := "SELECT table_name, table_type, engine, table_rows, create_time FROM information_schema.tables WHERE table_schema = DATABASE()"
+		rows, err = db.Query(ctx, query)
+		if err != nil {
+			// Fallback to a simpler query
+			query = "SHOW TABLES"
+			rows, err = db.Query(ctx, query)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get schema information: %w", err)
+			}
+		}
 	}
+
 	defer func() {
 		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("error closing rows: %v", closeErr)
+			logger.Error("error closing rows: %v", closeErr)
 		}
 	}()
 
@@ -102,7 +119,7 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 	}
 
 	// Create result
-	result = map[string]interface{}{
+	result := map[string]interface{}{
 		"database": dbID,
 		"tables":   tables,
 	}
@@ -259,4 +276,9 @@ func (uc *DatabaseUseCase) ExecuteTransaction(ctx context.Context, dbID, action 
 // Helper function to get current Unix timestamp
 func timeNowUnix() int64 {
 	return time.Now().Unix()
+}
+
+// GetDatabaseType returns the type of a database by ID
+func (uc *DatabaseUseCase) GetDatabaseType(dbID string) (string, error) {
+	return uc.repo.GetDatabaseType(dbID)
 }
