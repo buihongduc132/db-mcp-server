@@ -271,6 +271,34 @@ export DB_CONFIG='{"connections":[...]}'
 
 For each connected database (e.g., "mysql1", "mysql2"), the server creates:
 
+### Tool Naming Convention
+
+The server automatically generates tools with names following this format:
+
+```
+mcp_<server_name>_<tool_type>_<database_id>
+```
+
+Where:
+- `<server_name>`: The server name (defaults to "db" or can be set via MCP_SERVER_NAME environment variable)
+- `<tool_type>`: One of: query, execute, transaction, schema, performance
+- `<database_id>`: The ID of the database as defined in your configuration
+
+Example tool names for a database with ID "mysql1":
+- `mcp_db_query_mysql1`
+- `mcp_db_execute_mysql1`
+- `mcp_db_transaction_mysql1`
+- `mcp_db_schema_mysql1`
+- `mcp_db_performance_mysql1`
+
+To customize the server name prefix:
+```bash
+export MCP_SERVER_NAME="custom_name"
+./server -t stdio -c config.json
+```
+
+This will generate tools like `mcp_custom_name_query_mysql1`.
+
 ### Database-Specific Tools
 
 - `query_<dbid>`: Execute SQL queries on the specified database
@@ -460,19 +488,19 @@ alt="Buy Me A Coffee"/>
 </a>
 </p>
 
-## Tool Naming Convention
-
-Tools are registered with simple, straightforward names based on the tool type and database ID:
-
-```
-<tooltype>_<dbID>
-```
-
-For example: `query_mysql1`, `schema_postgres1`, or just `list_databases` for the database listing tool.
-
-These simple names make it easier for clients to use the tools directly, without complex prefixes or unnecessary duplication.
-
 ## Cursor Integration
+
+### Tool Naming Convention
+
+The MCP server registers tools with names that match the format Cursor expects. The tool names follow this format:
+
+```
+mcp_<servername>_<tooltype>_<dbID>
+```
+
+For example: `mcp_cashflow_db_mcp_server_stdio_schema_cashflow_db`
+
+The server uses the name `cashflow_db_mcp_server_stdio` by default, which should match your Cursor configuration in the `mcp.json` file.
 
 ### Cursor Configuration
 
@@ -481,7 +509,7 @@ In your Cursor configuration (`~/.cursor/mcp.json`), you should have a configura
 ```json
 {
     "mcpServers": {
-        "db-mcp-server-stdio": {
+        "cashflow-db-mcp-server-stdio": {
             "command": "/path/to/db-mcp-server/server",
             "args": [
                 "-t",
@@ -493,3 +521,140 @@ In your Cursor configuration (`~/.cursor/mcp.json`), you should have a configura
     }
 }
 ```
+
+The server will automatically register tools with names that match the server name in your Cursor configuration.
+
+### Custom Server Name
+
+If you need to use a different server name, you can set the `MCP_SERVER_NAME` environment variable:
+
+```bash
+export MCP_SERVER_NAME="your-custom-server-name"
+./server -t stdio -c your_config.json
+```
+
+This will register tools with names like `mcp_your-custom-server-name_schema_yourdb`.
+
+## MCP Configuration
+
+### Tool Naming Convention
+
+The server automatically generates tools with names following this format:
+
+```
+mcp_<server-name>_<tool-type>_<database_id>
+```
+
+Where:
+- `<server-name>`: The server name (defaults to "multidb" or can be set via MCP_SERVER_NAME environment variable)
+- `<tool-type>`: One of: query, execute, transaction, schema, performance
+- `<database_id>`: The ID of the database as defined in your configuration
+
+### Configuring mcp.json
+
+To properly configure your `mcp.json` file, follow these steps:
+
+1. First, determine your server name:
+   - If using the default, it will be "multidb"
+   - If you set MCP_SERVER_NAME environment variable, use that value
+
+2. Create or update your `mcp.json` file with the following structure:
+
+```json
+{
+    "mcpServers": {
+        "your-server-name": {
+            "command": "/path/to/db-mcp-server/server",
+            "args": [
+                "-t",
+                "stdio",
+                "-c",
+                "/path/to/your/config.json"
+            ]
+        }
+    }
+}
+```
+
+3. Example configurations:
+
+```json
+// Example 1: Using default server name (multidb)
+{
+    "mcpServers": {
+        "multidb": {
+            "command": "/path/to/db-mcp-server/server",
+            "args": [
+                "-t",
+                "stdio",
+                "-c",
+                "/path/to/your/config.json"
+            ]
+        }
+    }
+}
+
+// Example 2: Using custom server name
+{
+    "mcpServers": {
+        "cashflow": {
+            "command": "/path/to/db-mcp-server/server",
+            "args": [
+                "-t",
+                "stdio",
+                "-c",
+                "/path/to/your/config.json"
+            ]
+        }
+    }
+}
+```
+
+4. Available Tools:
+   For each database in your configuration, the following tools will be available:
+
+   ```
+   mcp_<server-name>_query_<database_id>      // Execute SQL queries
+   mcp_<server-name>_execute_<database_id>    // Execute SQL statements
+   mcp_<server-name>_transaction_<database_id> // Manage transactions
+   mcp_<server-name>_schema_<database_id>     // Get database schema
+   mcp_<server-name>_performance_<database_id> // Analyze query performance
+   mcp_<server-name>_list_databases           // List all available databases
+   ```
+
+5. Example with a database named "mysql1":
+   ```
+   mcp_multidb_query_mysql1
+   mcp_multidb_execute_mysql1
+   mcp_multidb_transaction_mysql1
+   mcp_multidb_schema_mysql1
+   mcp_multidb_performance_mysql1
+   mcp_multidb_list_databases
+   ```
+
+### Important Notes
+
+1. The server name in your `mcp.json` must match:
+   - The default server name ("multidb"), or
+   - The value you set in the MCP_SERVER_NAME environment variable
+
+2. If you change the server name:
+   - Update your `mcp.json` file
+   - Set the MCP_SERVER_NAME environment variable
+   - Restart the server
+
+3. To verify your configuration:
+   ```bash
+   # Set server name (if using custom name)
+   export MCP_SERVER_NAME="your-server-name"
+   
+   # Start the server
+   ./server -t stdio -c your_config.json
+   
+   # The server will log all available tools with their exact names
+   ```
+
+4. Common Issues:
+   - If tools are not showing up, check that the server name in `mcp.json` matches your environment
+   - If you get "tool not found" errors, verify the exact tool name in the server logs
+   - Make sure your database configuration file is properly set up and accessible

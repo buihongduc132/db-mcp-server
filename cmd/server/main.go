@@ -138,9 +138,9 @@ func main() {
 
 	// Create mcp-go server
 	mcpServer := server.NewMCPServer(
-		"DB MCP Server", // Server name
-		"1.0.0",         // Server version
-		logger,          // Logger
+		os.Getenv("MCP_SERVER_NAME"), // Use environment variable for server name
+		"1.0.0",                      // Server version
+		logger,                       // Logger
 	)
 
 	// Set up Clean Architecture layers
@@ -166,19 +166,23 @@ func main() {
 	}
 	log.Printf("Finished registering tools")
 
-	// If we have databases, display the available tools
+	// If we have databases, display the available tools with new naming convention
 	if len(dbIDs) > 0 {
+		serverName := os.Getenv("MCP_SERVER_NAME")
+		if serverName == "" {
+			serverName = "demo_sse" // Default server name
+		}
 		log.Printf("Available database tools:")
 		for _, dbID := range dbIDs {
 			log.Printf("  Database %s:", dbID)
-			log.Printf("    - query_%s: Execute SQL queries", dbID)
-			log.Printf("    - execute_%s: Execute SQL statements", dbID)
-			log.Printf("    - transaction_%s: Manage transactions", dbID)
-			log.Printf("    - performance_%s: Analyze query performance", dbID)
-			log.Printf("    - schema_%s: Get database schema", dbID)
+			log.Printf("    - mcp_%s_query_%s: Execute SQL queries", serverName, dbID)
+			log.Printf("    - mcp_%s_execute_%s: Execute SQL statements", serverName, dbID)
+			log.Printf("    - mcp_%s_transaction_%s: Manage transactions", serverName, dbID)
+			log.Printf("    - mcp_%s_performance_%s: Analyze query performance", serverName, dbID)
+			log.Printf("    - mcp_%s_schema_%s: Get database schema", serverName, dbID)
 		}
 		log.Printf("  Common tools:")
-		log.Printf("    - list_databases: List all available databases")
+		log.Printf("    - mcp_%s_list_databases: List all available databases", serverName)
 	}
 
 	// If no database connections, register mock tools to ensure at least some tools are available

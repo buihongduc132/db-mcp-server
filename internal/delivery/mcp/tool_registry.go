@@ -10,10 +10,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
+	"os"
 
 	"github.com/FreePeak/cortex/pkg/server"
 )
+
+const defaultServerName = "multidb"
 
 // ToolRegistry structure to handle tool registration
 type ToolRegistry struct {
@@ -46,10 +48,16 @@ func (tr *ToolRegistry) RegisterAllTools(ctx context.Context, useCase UseCasePro
 		return tr.RegisterMockTools(ctx)
 	}
 
+	// Get server name from environment or use default
+	serverName := os.Getenv("MCP_SERVER_NAME")
+	if serverName == "" {
+		serverName = defaultServerName // Default server name
+	}
+
 	// Register database-specific tools
 	registrationErrors := 0
 	for _, dbID := range dbList {
-		if err := tr.registerDatabaseTools(ctx, dbID); err != nil {
+		if err := tr.registerDatabaseTools(ctx, dbID, serverName); err != nil {
 			log.Printf("Error registering tools for database %s: %v", dbID, err)
 			registrationErrors++
 		} else {
@@ -57,8 +65,8 @@ func (tr *ToolRegistry) RegisterAllTools(ctx context.Context, useCase UseCasePro
 		}
 	}
 
-	// Register common tools
-	tr.registerCommonTools(ctx)
+	// Register common tools with server name prefix
+	tr.registerCommonTools(ctx, serverName)
 
 	if registrationErrors > 0 {
 		return fmt.Errorf("errors occurred while registering tools for %d databases", registrationErrors)
@@ -67,7 +75,7 @@ func (tr *ToolRegistry) RegisterAllTools(ctx context.Context, useCase UseCasePro
 }
 
 // registerDatabaseTools registers all tools for a specific database
-func (tr *ToolRegistry) registerDatabaseTools(ctx context.Context, dbID string) error {
+func (tr *ToolRegistry) registerDatabaseTools(ctx context.Context, dbID string, serverName string) error {
 	// Get all tool types from the factory
 	toolTypeNames := []string{
 		"query", "execute", "transaction", "performance", "schema",
@@ -86,8 +94,8 @@ func (tr *ToolRegistry) registerDatabaseTools(ctx context.Context, dbID string) 
 	// Register each tool type for this database
 	registrationErrors := 0
 	for _, typeName := range toolTypeNames {
-		// Use simpler tool names: <tooltype>_<dbID>
-		toolName := fmt.Sprintf("%s_%s", typeName, dbID)
+		// Format tool name as mcp_<server-name>_<tool-type>_<dbID>
+		toolName := fmt.Sprintf("mcp_%s_%s_%s", serverName, typeName, dbID)
 		if err := tr.registerTool(ctx, typeName, toolName, dbID); err != nil {
 			log.Printf("Error registering tool %s: %v", toolName, err)
 			registrationErrors++
@@ -122,12 +130,12 @@ func (tr *ToolRegistry) registerTool(ctx context.Context, toolTypeName string, n
 }
 
 // registerCommonTools registers tools that are not specific to a database
-func (tr *ToolRegistry) registerCommonTools(ctx context.Context) {
-	// Register the list_databases tool with simple name
+func (tr *ToolRegistry) registerCommonTools(ctx context.Context, serverName string) {
+	// Register the list_databases tool with server name prefix
 	_, ok := tr.factory.GetToolType("list_databases")
 	if ok {
-		// Use simple name for list_databases tool
-		listDbName := "list_databases"
+		// Format: mcp_<server-name>_list_databases
+		listDbName := fmt.Sprintf("mcp_%s_list_databases", serverName)
 		if err := tr.registerTool(ctx, "list_databases", listDbName, ""); err != nil {
 			log.Printf("Error registering %s tool: %v", listDbName, err)
 		} else {
@@ -140,10 +148,16 @@ func (tr *ToolRegistry) registerCommonTools(ctx context.Context) {
 func (tr *ToolRegistry) RegisterMockTools(ctx context.Context) error {
 	log.Printf("Registering mock tools")
 
+	// Get server name from environment or use default
+	serverName := os.Getenv("MCP_SERVER_NAME")
+	if serverName == "" {
+		serverName = defaultServerName // Default server name
+	}
+
 	// For each tool type, register a simplified mock tool
 	for toolTypeName := range tr.factory.toolTypes {
-		// Format: mock_<tooltype>
-		mockToolName := fmt.Sprintf("mock_%s", toolTypeName)
+		// Format: mcp_<server-name>_mock_<tooltype>
+		mockToolName := fmt.Sprintf("mcp_%s_mock_%s", serverName, toolTypeName)
 
 		toolTypeImpl, ok := tr.factory.GetToolType(toolTypeName)
 		if !ok {
@@ -172,32 +186,4 @@ func (tr *ToolRegistry) RegisterMockTools(ctx context.Context) error {
 func (tr *ToolRegistry) RegisterCursorCompatibleTools(ctx context.Context) error {
 	// This function is intentionally empty as we now register tools with simple names directly
 	return nil
-}
-
-// createToolAlias creates an alias for an existing tool
-func (tr *ToolRegistry) createToolAlias(ctx context.Context, toolTypeName string, existingName string, aliasName string) error {
-	log.Printf("Creating alias '%s' for tool '%s'", aliasName, existingName)
-
-	toolTypeImpl, ok := tr.factory.GetToolType(toolTypeName)
-	if !ok {
-		return fmt.Errorf("failed to get tool type for '%s'", toolTypeName)
-	}
-
-	// For aliases that apply to a specific database, extract the dbID from the existing name
-	dbID := ""
-	parts := strings.Split(existingName, "_")
-	if len(parts) > 1 {
-		dbID = parts[1]
-	}
-
-	// Create a new tool with the alias name
-	tool := toolTypeImpl.CreateTool(aliasName, dbID)
-
-	// Add the tool handler that delegates to the appropriate implementation
-	return tr.server.AddTool(ctx, tool, func(ctx context.Context, request server.ToolCallRequest) (interface{}, error) {
-		// When this alias is called, update the request name to the original name
-		// but preserve all other request parameters
-		response, err := toolTypeImpl.HandleRequest(ctx, request, dbID, tr.databaseUseCase)
-		return FormatResponse(response, err)
-	})
 }
