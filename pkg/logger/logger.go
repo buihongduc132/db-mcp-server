@@ -25,7 +25,9 @@ func Initialize(logLevel string) {
 		// Create logs directory if it doesn't exist
 		logsDir := "logs"
 		if _, err := os.Stat(logsDir); os.IsNotExist(err) {
-			os.Mkdir(logsDir, 0755)
+			if err := os.Mkdir(logsDir, 0755); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to create logs directory: %v\n", err)
+			}
 		}
 
 		// Create log file with timestamp
@@ -118,7 +120,11 @@ func logMessage(level string, format string, v ...interface{}) {
 			formattedMsg := fmt.Sprintf("[%s] %s: %s\n", timestamp, level, message)
 
 			// Write to log file directly
-			logFile.WriteString(formattedMsg)
+			if _, err := logFile.WriteString(formattedMsg); err != nil {
+				// We can't use stdout since we're in stdio mode, so we have to suppress this error
+				// or write to stderr as a last resort
+				fmt.Fprintf(os.Stderr, "Failed to write to log file: %v\n", err)
+			}
 		}
 		return
 	}

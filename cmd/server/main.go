@@ -253,8 +253,7 @@ func main() {
 
 	case "stdio":
 		// We can only log to stderr in stdio mode - NEVER stdout
-		stderrMsg := fmt.Sprintf("Starting STDIO server - all logging redirected to log files\n")
-		fmt.Fprintf(os.Stderr, stderrMsg)
+		fmt.Fprintln(os.Stderr, "Starting STDIO server - all logging redirected to log files")
 
 		// Create logs directory if not exists
 		logsDir := "logs"

@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"github.com/FreePeak/cortex/pkg/server"
+
 	"github.com/FreePeak/db-mcp-server/internal/logger"
 )
 

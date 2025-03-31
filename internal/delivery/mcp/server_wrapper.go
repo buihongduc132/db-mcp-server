@@ -5,6 +5,7 @@ import (
 
 	"github.com/FreePeak/cortex/pkg/server"
 	"github.com/FreePeak/cortex/pkg/types"
+
 	"github.com/FreePeak/db-mcp-server/internal/logger"
 )
 

@@ -84,7 +84,9 @@ func Initialize(level string) {
 		// Create a log file in logs directory
 		logsDir := "logs"
 		if _, err := os.Stat(logsDir); os.IsNotExist(err) {
-			os.Mkdir(logsDir, 0755)
+			if err := os.Mkdir(logsDir, 0755); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to create logs directory: %v\n", err)
+			}
 		}
 
 		timestamp := time.Now().Format("20060102-150405")

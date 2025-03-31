@@ -14,6 +14,13 @@
         },
         "multidb3": {
             "url": "http://127.0.0.1:9092/sse"
+        },
+        "example_stdio": {
+            "command": "/Users/harvey/Work/dev/FreePeak/Opensource/cortex/bin/stdio-server",
+            "args": [
+                ">",
+                "./run.log"
+            ]
         }
     }
 }

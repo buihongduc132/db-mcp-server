@@ -507,8 +507,8 @@ func getArrayParam(params map[string]interface{}, key string) ([]interface{}, bo
 	return nil, false
 }
 
-// loadConfigFromFile loads database configuration from a file
-func loadConfigFromFile(cfg *Config) (*db.MultiDBConfig, error) {
+// _loadConfigFromFile loads database configuration from a file (currently unused)
+func _loadConfigFromFile(cfg *Config) (*db.MultiDBConfig, error) {
 	if cfg.ConfigFile == "" {
 		return nil, fmt.Errorf("no config file specified")
 	}
@@ -546,8 +546,8 @@ func loadConfigFromFile(cfg *Config) (*db.MultiDBConfig, error) {
 	return &dbConfig, nil
 }
 
-// getEnv gets an environment variable or returns a default value
-func getEnv(key, defaultValue string) string {
+// _getEnv gets an environment variable or returns a default value (currently unused)
+func _getEnv(key, defaultValue string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		return defaultValue
@@ -555,8 +555,8 @@ func getEnv(key, defaultValue string) string {
 	return value
 }
 
-// getIntEnv gets an environment variable as an integer or returns a default value
-func getIntEnv(key string, defaultValue int) int {
+// _getIntEnv gets an environment variable as an integer or returns a default value (currently unused)
+func _getIntEnv(key string, defaultValue int) int {
 	value := os.Getenv(key)
 	if value == "" {
 		return defaultValue
@@ -568,8 +568,8 @@ func getIntEnv(key string, defaultValue int) int {
 	return intValue
 }
 
-// loadConfigFromEnv loads database configuration from the environment
-func loadConfigFromEnv() (*db.MultiDBConfig, error) {
+// _loadConfigFromEnv loads database configuration from the environment (currently unused)
+func _loadConfigFromEnv() (*db.MultiDBConfig, error) {
 	// Check if DB_CONFIG environment variable is set
 	dbConfigEnv := os.Getenv("DB_CONFIG")
 	if dbConfigEnv != "" {
@@ -584,12 +584,12 @@ func loadConfigFromEnv() (*db.MultiDBConfig, error) {
 
 	// Create config from individual environment variables
 	// Load database configuration from environment variables
-	dbType := getEnv("DB_TYPE", "mysql")
-	dbHost := getEnv("DB_HOST", "localhost")
-	dbPort := getIntEnv("DB_PORT", 3306)
-	dbUser := getEnv("DB_USER", "")
-	dbPass := getEnv("DB_PASSWORD", "")
-	dbName := getEnv("DB_NAME", "")
+	dbType := _getEnv("DB_TYPE", "mysql")
+	dbHost := _getEnv("DB_HOST", "localhost")
+	dbPort := _getIntEnv("DB_PORT", 3306)
+	dbUser := _getEnv("DB_USER", "")
+	dbPass := _getEnv("DB_PASSWORD", "")
+	dbName := _getEnv("DB_NAME", "")
 
 	// Create a default configuration with a single connection
 	dbConfig := &db.MultiDBConfig{
