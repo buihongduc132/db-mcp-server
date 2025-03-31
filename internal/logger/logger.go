@@ -3,11 +3,12 @@ package logger
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"runtime/debug"
 	"strings"
-	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // Level represents the severity of a log message
@@ -26,20 +27,49 @@ const (
 
 var (
 	// Default logger
-	logger   *log.Logger
-	logLevel Level
+	zapLogger *zap.Logger
+	logLevel  Level
 )
 
 // Initialize sets up the logger with the specified level
 func Initialize(level string) {
-	logger = log.New(os.Stdout, "", 0)
 	setLogLevel(level)
+
+	config := zap.NewProductionConfig()
+	config.EncoderConfig.TimeKey = "time"
+	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	config.OutputPaths = []string{"stdout"}
+	config.Level = getZapLevel(logLevel)
+
+	var err error
+	zapLogger, err = config.Build()
+	if err != nil {
+		// If Zap logger cannot be built, fall back to standard logger
+		fmt.Printf("Failed to initialize zap logger: %v. Falling back to standard logger.\n", err)
+		zapLogger = zap.NewNop()
+	}
 }
 
 // InitializeWithWriter sets up the logger with the specified level and output writer
 func InitializeWithWriter(level string, writer *os.File) {
-	logger = log.New(writer, "", 0)
 	setLogLevel(level)
+
+	config := zap.NewProductionConfig()
+	config.EncoderConfig.TimeKey = "time"
+	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	// Create custom core with the provided writer
+	encoderConfig := zap.NewProductionEncoderConfig()
+	encoderConfig.TimeKey = "time"
+	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	core := zapcore.NewCore(
+		zapcore.NewJSONEncoder(encoderConfig),
+		zapcore.AddSync(writer),
+		getZapLevel(logLevel),
+	)
+
+	zapLogger = zap.New(core)
 }
 
 // setLogLevel sets the log level from a string
@@ -58,61 +88,56 @@ func setLogLevel(level string) {
 	}
 }
 
-// log logs a message with the given level
-func logMessage(level Level, format string, v ...interface{}) {
-	if level < logLevel {
-		return
-	}
-
-	prefix := ""
-	var colorCode string
-
+// getZapLevel converts our level to zap.AtomicLevel
+func getZapLevel(level Level) zap.AtomicLevel {
 	switch level {
 	case LevelDebug:
-		prefix = "DEBUG"
-		colorCode = "\033[36m" // Cyan
+		return zap.NewAtomicLevelAt(zapcore.DebugLevel)
 	case LevelInfo:
-		prefix = "INFO"
-		colorCode = "\033[32m" // Green
+		return zap.NewAtomicLevelAt(zapcore.InfoLevel)
 	case LevelWarn:
-		prefix = "WARN"
-		colorCode = "\033[33m" // Yellow
+		return zap.NewAtomicLevelAt(zapcore.WarnLevel)
 	case LevelError:
-		prefix = "ERROR"
-		colorCode = "\033[31m" // Red
-	}
-
-	resetColor := "\033[0m" // Reset color
-	timestamp := time.Now().Format("2006/01/02 15:04:05.000")
-	message := fmt.Sprintf(format, v...)
-
-	// Use color codes only if output is terminal
-	fileInfo, err := os.Stdout.Stat()
-	if err == nil && (fileInfo.Mode()&os.ModeCharDevice) != 0 {
-		logger.Printf("%s %s%s%s: %s", timestamp, colorCode, prefix, resetColor, message)
-	} else {
-		logger.Printf("%s %s: %s", timestamp, prefix, message)
+		return zap.NewAtomicLevelAt(zapcore.ErrorLevel)
+	default:
+		return zap.NewAtomicLevelAt(zapcore.InfoLevel)
 	}
 }
 
 // Debug logs a debug message
 func Debug(format string, v ...interface{}) {
-	logMessage(LevelDebug, format, v...)
+	if logLevel > LevelDebug {
+		return
+	}
+	msg := fmt.Sprintf(format, v...)
+	zapLogger.Debug(msg)
 }
 
 // Info logs an info message
 func Info(format string, v ...interface{}) {
-	logMessage(LevelInfo, format, v...)
+	if logLevel > LevelInfo {
+		return
+	}
+	msg := fmt.Sprintf(format, v...)
+	zapLogger.Info(msg)
 }
 
 // Warn logs a warning message
 func Warn(format string, v ...interface{}) {
-	logMessage(LevelWarn, format, v...)
+	if logLevel > LevelWarn {
+		return
+	}
+	msg := fmt.Sprintf(format, v...)
+	zapLogger.Warn(msg)
 }
 
 // Error logs an error message
 func Error(format string, v ...interface{}) {
-	logMessage(LevelError, format, v...)
+	if logLevel > LevelError {
+		return
+	}
+	msg := fmt.Sprintf(format, v...)
+	zapLogger.Error(msg)
 }
 
 // ErrorWithStack logs an error with a stack trace
@@ -120,36 +145,47 @@ func ErrorWithStack(err error) {
 	if err == nil {
 		return
 	}
-	logMessage(LevelError, "%v\n%s", err, debug.Stack())
+	zapLogger.Error(
+		err.Error(),
+		zap.String("stack", string(debug.Stack())),
+	)
 }
 
 // RequestLog logs details of an HTTP request
 func RequestLog(method, url, sessionID, body string) {
-	Debug("HTTP Request: %s %s", method, url)
-	if sessionID != "" {
-		Debug("Session ID: %s", sessionID)
+	if logLevel > LevelDebug {
+		return
 	}
-	if body != "" {
-		Debug("Request Body: %s", body)
-	}
+	zapLogger.Debug("HTTP Request",
+		zap.String("method", method),
+		zap.String("url", url),
+		zap.String("sessionID", sessionID),
+		zap.String("body", body),
+	)
 }
 
 // ResponseLog logs details of an HTTP response
 func ResponseLog(statusCode int, sessionID, body string) {
-	Debug("HTTP Response: Status %d", statusCode)
-	if sessionID != "" {
-		Debug("Session ID: %s", sessionID)
+	if logLevel > LevelDebug {
+		return
 	}
-	if body != "" {
-		Debug("Response Body: %s", body)
-	}
+	zapLogger.Debug("HTTP Response",
+		zap.Int("statusCode", statusCode),
+		zap.String("sessionID", sessionID),
+		zap.String("body", body),
+	)
 }
 
 // SSEEventLog logs details of an SSE event
 func SSEEventLog(eventType, sessionID, data string) {
-	Debug("SSE Event: %s", eventType)
-	Debug("Session ID: %s", sessionID)
-	Debug("Event Data: %s", data)
+	if logLevel > LevelDebug {
+		return
+	}
+	zapLogger.Debug("SSE Event",
+		zap.String("eventType", eventType),
+		zap.String("sessionID", sessionID),
+		zap.String("data", data),
+	)
 }
 
 // RequestResponseLog logs a combined request and response log entry
@@ -181,8 +217,10 @@ func RequestResponseLog(method, sessionID string, requestData, responseData stri
 		}
 	}
 
-	Debug("==== BEGIN %s [Session: %s] ====", method, sessionID)
-	Debug("REQUEST:\n%s", formattedRequest)
-	Debug("RESPONSE:\n%s", formattedResponse)
-	Debug("==== END %s ====", method)
+	zapLogger.Debug("Request/Response",
+		zap.String("method", method),
+		zap.String("sessionID", sessionID),
+		zap.String("request", formattedRequest),
+		zap.String("response", formattedResponse),
+	)
 }
