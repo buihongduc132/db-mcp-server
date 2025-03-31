@@ -8,11 +8,13 @@ services:
     volumes:
       - ./config.json:/app/config.json
       - ./wait-for-it.sh:/app/wait-for-it.sh
-    command: ["/bin/sh", "-c", "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1:3306 -t 60 && /app/wait-for-it.sh mysql2:3306 -t 60 && /app/server -t sse -c /app/config.json"]
+    command: ["/bin/sh", "-c", "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1:3306 -t 60 && /app/wait-for-it.sh mysql2:3306 -t 60 && /app/wait-for-it.sh postgres1:5432 -t 60 && /app/server -t sse -c /app/config.json"]
     depends_on:
       mysql1:
         condition: service_healthy
       mysql2:
+        condition: service_healthy
+      postgres1:
         condition: service_healthy
 
   mysql1:
@@ -53,6 +55,23 @@ services:
       timeout: 5s
       retries: 10
 
+  postgres1:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user1
+      POSTGRES_PASSWORD: password1
+      POSTGRES_DB: db1  
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres1_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user1 -d db1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   mysql1_data:
   mysql2_data: 
+  postgres1_data:

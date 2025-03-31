@@ -17,6 +17,15 @@
       "name": "db2",
       "user": "user2",
       "password": "password2"
+    },
+    {
+      "id": "postgres1",
+      "type": "postgres",
+      "host": "postgres1",
+      "port": 5432,
+      "name": "db1",
+      "user": "user1",
+      "password": "password1"
     }
   ]
 } 

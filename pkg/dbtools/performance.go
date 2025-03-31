@@ -3,10 +3,11 @@ package dbtools
 import (
 	"context"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/FreePeak/db-mcp-server/pkg/logger"
 )
 
 // QueryMetrics stores performance metrics for a database query
@@ -67,7 +68,7 @@ func NewPerformanceAnalyzer() *PerformanceAnalyzer {
 func (pa *PerformanceAnalyzer) LogSlowQuery(query string, params []interface{}, duration time.Duration) {
 	if duration >= pa.slowThreshold {
 		paramStr := formatParams(params)
-		log.Printf("Slow query detected (%.2fms): %s [params: %s]",
+		logger.Warn("Slow query detected (%.2fms): %s [params: %s]",
 			float64(duration.Microseconds())/1000.0,
 			query,
 			paramStr)
@@ -136,7 +137,7 @@ func NewSQLIssueDetector() *SQLIssueDetector {
 func (d *SQLIssueDetector) AddPattern(name, pattern string) {
 	re, err := regexp.Compile("(?i)" + pattern)
 	if err != nil {
-		log.Printf("Error compiling regex pattern '%s': %v", pattern, err)
+		logger.Error("Error compiling regex pattern '%s': %v", pattern, err)
 		return
 	}
 	d.patterns[name] = re
@@ -213,7 +214,7 @@ func StripComments(input string) string {
 	multiLineRe, err := regexp.Compile(`/\*[\s\S]*?\*/`)
 	if err != nil {
 		// If there's an error with the regex, just return the input
-		log.Printf("Error compiling regex pattern '%s': %v", `\/\*[\s\S]*?\*\/`, err)
+		logger.Error("Error compiling regex pattern '%s': %v", `\/\*[\s\S]*?\*\/`, err)
 		return input
 	}
 	withoutMultiLine := multiLineRe.ReplaceAllString(input, "")

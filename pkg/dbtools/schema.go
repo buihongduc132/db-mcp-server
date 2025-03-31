@@ -3,10 +3,10 @@ package dbtools
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/pkg/db"
+	"github.com/FreePeak/db-mcp-server/pkg/logger"
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
@@ -101,14 +101,41 @@ func handleSchemaExplorer(ctx context.Context, params map[string]interface{}) (i
 
 // getTables retrieves the list of tables in the database
 func getTables(ctx context.Context, db db.Database) (interface{}, error) {
-	query := "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+	// Get database type from connected database
+	dbType := "mysql" // Default to MySQL
+	if db.DriverName() == "postgres" {
+		dbType = "postgres"
+	}
+
+	var query string
+
+	// Use database-specific query
+	if dbType == "postgres" {
+		query = "SELECT tablename as table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
+	} else {
+		// MySQL
+		query = "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()"
+	}
+
 	rows, err := db.Query(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get tables: %w", err)
+		// Fallback queries if primary query fails
+		if dbType == "postgres" {
+			query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+		} else {
+			query = "SHOW TABLES"
+		}
+		rows, err = db.Query(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get tables: %w", err)
+		}
 	}
+
 	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("error closing rows: %v", closeErr)
+		if rows != nil {
+			if err := rows.Close(); err != nil {
+				logger.Error("error closing rows: %v", err)
+			}
 		}
 	}()
 
@@ -125,19 +152,44 @@ func getTables(ctx context.Context, db db.Database) (interface{}, error) {
 
 // getColumns retrieves the columns for a specific table
 func getColumns(ctx context.Context, db db.Database, table string) (interface{}, error) {
-	query := `
-		SELECT column_name, data_type, is_nullable, column_default
-		FROM information_schema.columns
-		WHERE table_name = $1 AND table_schema = 'public'
-		ORDER BY ordinal_position
-	`
+	// Get database type from connected database
+	dbType := "mysql" // Default to MySQL
+	if db.DriverName() == "postgres" {
+		dbType = "postgres"
+	}
+
+	var query string
+
+	// Use database-specific query
+	if dbType == "postgres" {
+		query = `
+			SELECT column_name, data_type, 
+				   CASE WHEN is_nullable = 'YES' THEN 'YES' ELSE 'NO' END as is_nullable,
+				   column_default
+			FROM information_schema.columns 
+			WHERE table_name = $1 AND table_schema = 'public'
+			ORDER BY ordinal_position
+		`
+	} else {
+		// MySQL
+		query = `
+			SELECT column_name, data_type, is_nullable, column_default
+			FROM information_schema.columns
+			WHERE table_name = ? AND table_schema = DATABASE()
+			ORDER BY ordinal_position
+		`
+	}
+
 	rows, err := db.Query(ctx, query, table)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns for table %s: %w", table, err)
 	}
+
 	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("error closing rows: %v", closeErr)
+		if rows != nil {
+			if err := rows.Close(); err != nil {
+				logger.Error("error closing rows: %v", err)
+			}
 		}
 	}()
 
@@ -155,39 +207,76 @@ func getColumns(ctx context.Context, db db.Database, table string) (interface{},
 
 // getRelationships retrieves the relationships for a table or all tables
 func getRelationships(ctx context.Context, db db.Database, table string) (interface{}, error) {
-	query := `
-		SELECT
-			tc.table_schema,
-			tc.constraint_name,
-			tc.table_name,
-			kcu.column_name,
-			ccu.table_schema AS foreign_table_schema,
-			ccu.table_name AS foreign_table_name,
-			ccu.column_name AS foreign_column_name
-		FROM information_schema.table_constraints AS tc
-		JOIN information_schema.key_column_usage AS kcu
-			ON tc.constraint_name = kcu.constraint_name
-			AND tc.table_schema = kcu.table_schema
-		JOIN information_schema.constraint_column_usage AS ccu
-			ON ccu.constraint_name = tc.constraint_name
-			AND ccu.table_schema = tc.table_schema
-		WHERE tc.constraint_type = 'FOREIGN KEY'
-			AND tc.table_schema = 'public'
-	`
-	args := []interface{}{}
+	// Get database type from connected database
+	dbType := "mysql" // Default to MySQL
+	if db.DriverName() == "postgres" {
+		dbType = "postgres"
+	}
 
-	if table != "" {
-		query += " AND tc.table_name = $1"
-		args = append(args, table)
+	var query string
+	var args []interface{}
+
+	// Use database-specific query
+	if dbType == "postgres" {
+		query = `
+			SELECT
+				tc.table_schema,
+				tc.constraint_name,
+				tc.table_name,
+				kcu.column_name,
+				ccu.table_schema AS foreign_table_schema,
+				ccu.table_name AS foreign_table_name,
+				ccu.column_name AS foreign_column_name
+			FROM information_schema.table_constraints AS tc
+			JOIN information_schema.key_column_usage AS kcu
+				ON tc.constraint_name = kcu.constraint_name
+				AND tc.table_schema = kcu.table_schema
+			JOIN information_schema.constraint_column_usage AS ccu
+				ON ccu.constraint_name = tc.constraint_name
+				AND ccu.table_schema = tc.table_schema
+			WHERE tc.constraint_type = 'FOREIGN KEY'
+				AND tc.table_schema = 'public'
+		`
+
+		if table != "" {
+			query += " AND tc.table_name = $1"
+			args = append(args, table)
+		}
+	} else {
+		// MySQL
+		query = `
+			SELECT
+				tc.table_schema,
+				tc.constraint_name,
+				tc.table_name,
+				kcu.column_name,
+				kcu.referenced_table_schema AS foreign_table_schema,
+				kcu.referenced_table_name AS foreign_table_name,
+				kcu.referenced_column_name AS foreign_column_name
+			FROM information_schema.table_constraints AS tc
+			JOIN information_schema.key_column_usage AS kcu
+				ON tc.constraint_name = kcu.constraint_name
+				AND tc.table_schema = kcu.table_schema
+			WHERE tc.constraint_type = 'FOREIGN KEY'
+				AND tc.table_schema = DATABASE()
+		`
+
+		if table != "" {
+			query += " AND tc.table_name = ?"
+			args = append(args, table)
+		}
 	}
 
 	rows, err := db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get relationships for table %s: %w", table, err)
 	}
+
 	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			log.Printf("error closing rows: %v", closeErr)
+		if rows != nil {
+			if err := rows.Close(); err != nil {
+				logger.Error("error closing rows: %v", err)
+			}
 		}
 	}()
 

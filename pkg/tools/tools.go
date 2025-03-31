@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/FreePeak/db-mcp-server/pkg/logger"
 )
 
 // Tool represents a tool that can be executed by the MCP server
@@ -97,13 +99,13 @@ func (r *Registry) RegisterTool(tool *Tool) {
 
 	// Validate tool
 	if tool.Name == "" {
-		fmt.Printf("Warning: Tool has empty name, not registering\n")
+		logger.Warn("Warning: Tool has empty name, not registering")
 		return
 	}
 
 	// Check for duplicate tool names
 	if _, exists := r.tools[tool.Name]; exists {
-		fmt.Printf("Warning: Tool '%s' already registered, overwriting\n", tool.Name)
+		logger.Warn("Warning: Tool '%s' already registered, overwriting", tool.Name)
 	}
 
 	r.tools[tool.Name] = tool
@@ -162,9 +164,9 @@ func (r *Registry) PrintTools() {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	fmt.Println("Registered tools:")
+	logger.Info("Registered tools:")
 	for name, tool := range r.tools {
-		fmt.Printf("- %s: %s\n", name, tool.Description)
+		logger.Info("- %s: %s", name, tool.Description)
 	}
 }
 

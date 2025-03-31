@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/FreePeak/db-mcp-server/pkg/logger"
 )
 
 // DatabaseConnectionConfig represents a single database connection configuration
@@ -83,14 +85,14 @@ func (m *Manager) Connect() error {
 		if err != nil {
 			errMsg := fmt.Errorf("failed to create database instance for %s: %w", id, err)
 			connectErrors = append(connectErrors, errMsg)
-			fmt.Printf("Error: %v\n", errMsg)
+			logger.Error("Error: %v", errMsg)
 			continue
 		}
 
 		if err := db.Connect(); err != nil {
 			errMsg := fmt.Errorf("failed to connect to database %s: %w", id, err)
 			connectErrors = append(connectErrors, errMsg)
-			fmt.Printf("Error: %v\n", errMsg)
+			logger.Error("Error: %v", errMsg)
 			continue
 		}
 
@@ -105,10 +107,10 @@ func (m *Manager) Connect() error {
 	}
 
 	if len(connectErrors) > 0 {
-		fmt.Printf("Warning: Connected to %d/%d databases. %d failed: %v\n",
+		logger.Warn("Warning: Connected to %d/%d databases. %d failed: %v",
 			successfulConnections, totalConfigs, len(connectErrors), connectErrors)
 	} else {
-		fmt.Printf("Successfully connected to all %d databases\n", successfulConnections)
+		logger.Info("Successfully connected to all %d databases", successfulConnections)
 	}
 
 	return nil

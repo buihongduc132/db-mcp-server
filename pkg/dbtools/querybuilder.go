@@ -3,13 +3,13 @@ package dbtools
 import (
 	"context"
 	"fmt"
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/FreePeak/db-mcp-server/pkg/db"
+	"github.com/FreePeak/db-mcp-server/pkg/logger"
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
@@ -492,7 +492,7 @@ func analyzeQueryPlan(ctx context.Context, db db.Database, query string) (interf
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			log.Printf("error closing rows: %v", err)
+			logger.Error("error closing rows: %v", err)
 		}
 	}()
 
@@ -587,7 +587,7 @@ func extractLineNumberFromError(errMsg string) int {
 		if len(lineMatch) > 1 {
 			lineNum, scanErr := strconv.Atoi(lineMatch[1])
 			if scanErr != nil {
-				log.Printf("Failed to parse line number: %v", scanErr)
+				logger.Warn("Failed to parse line number: %v", scanErr)
 				continue
 			}
 			return lineNum
@@ -619,7 +619,7 @@ func extractPositionFromError(errMsg string) int {
 			// For numeric positions
 			pos, scanErr := strconv.Atoi(posMatch[1])
 			if scanErr != nil {
-				log.Printf("Failed to parse position: %v", scanErr)
+				logger.Warn("Failed to parse position: %v", scanErr)
 				continue
 			}
 			return pos

@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
+	"github.com/FreePeak/db-mcp-server/pkg/logger"
 	// Import database drivers
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
@@ -139,7 +139,7 @@ func (d *database) Connect() error {
 	}
 
 	d.db = db
-	log.Printf("Connected to %s database at %s:%d/%s", d.config.Type, d.config.Host, d.config.Port, d.config.Name)
+	logger.Info("Connected to %s database at %s:%d/%s", d.config.Type, d.config.Host, d.config.Port, d.config.Name)
 
 	return nil
 }
@@ -150,7 +150,8 @@ func (d *database) Close() error {
 		return nil
 	}
 	if err := d.db.Close(); err != nil {
-		fmt.Printf("Error closing database connection: %v\n", err)
+		logger.Error("Error closing database connection: %v", err)
+		return err
 	}
 	return nil
 }
