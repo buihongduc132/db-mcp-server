@@ -276,28 +276,19 @@ For each connected database (e.g., "mysql1", "mysql2"), the server creates:
 The server automatically generates tools with names following this format:
 
 ```
-mcp_<server_name>_<tool_type>_<database_id>
+<tool_type>_<database_id>
 ```
 
 Where:
-- `<server_name>`: The server name (defaults to "db" or can be set via MCP_SERVER_NAME environment variable)
 - `<tool_type>`: One of: query, execute, transaction, schema, performance
 - `<database_id>`: The ID of the database as defined in your configuration
 
 Example tool names for a database with ID "mysql1":
-- `mcp_db_query_mysql1`
-- `mcp_db_execute_mysql1`
-- `mcp_db_transaction_mysql1`
-- `mcp_db_schema_mysql1`
-- `mcp_db_performance_mysql1`
-
-To customize the server name prefix:
-```bash
-export MCP_SERVER_NAME="custom_name"
-./server -t stdio -c config.json
-```
-
-This will generate tools like `mcp_custom_name_query_mysql1`.
+- `query_mysql1`
+- `execute_mysql1`
+- `transaction_mysql1`
+- `schema_mysql1`
+- `performance_mysql1`
 
 ### Database-Specific Tools
 
@@ -522,15 +513,4 @@ In your Cursor configuration (`~/.cursor/mcp.json`), you should have a configura
 }
 ```
 
-The server will automatically register tools with names that match the server name in your Cursor configuration.
-
-### Custom Server Name
-
-If you need to use a different server name, you can set the `MCP_SERVER_NAME` environment variable:
-
-```bash
-export MCP_SERVER_NAME="your-custom-server-name"
-./server -t stdio -c your_config.json
-```
-
-This will register tools with names like `mcp_your-custom-server-name_schema_yourdb`.
+The server will automatically register tools with simple names that match the database identifiers in your configuration.

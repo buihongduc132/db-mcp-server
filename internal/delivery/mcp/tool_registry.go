@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 
 	"github.com/FreePeak/cortex/pkg/server"
 )
@@ -172,32 +171,4 @@ func (tr *ToolRegistry) RegisterMockTools(ctx context.Context) error {
 func (tr *ToolRegistry) RegisterCursorCompatibleTools(ctx context.Context) error {
 	// This function is intentionally empty as we now register tools with simple names directly
 	return nil
-}
-
-// createToolAlias creates an alias for an existing tool
-func (tr *ToolRegistry) createToolAlias(ctx context.Context, toolTypeName string, existingName string, aliasName string) error {
-	log.Printf("Creating alias '%s' for tool '%s'", aliasName, existingName)
-
-	toolTypeImpl, ok := tr.factory.GetToolType(toolTypeName)
-	if !ok {
-		return fmt.Errorf("failed to get tool type for '%s'", toolTypeName)
-	}
-
-	// For aliases that apply to a specific database, extract the dbID from the existing name
-	dbID := ""
-	parts := strings.Split(existingName, "_")
-	if len(parts) > 1 {
-		dbID = parts[1]
-	}
-
-	// Create a new tool with the alias name
-	tool := toolTypeImpl.CreateTool(aliasName, dbID)
-
-	// Add the tool handler that delegates to the appropriate implementation
-	return tr.server.AddTool(ctx, tool, func(ctx context.Context, request server.ToolCallRequest) (interface{}, error) {
-		// When this alias is called, update the request name to the original name
-		// but preserve all other request parameters
-		response, err := toolTypeImpl.HandleRequest(ctx, request, dbID, tr.databaseUseCase)
-		return FormatResponse(response, err)
-	})
 }

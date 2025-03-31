@@ -9,6 +9,35 @@ import (
 	"github.com/FreePeak/cortex/pkg/tools"
 )
 
+// createTextResponse creates a simple response with a text content
+func createTextResponse(text string) map[string]interface{} {
+	return map[string]interface{}{
+		"content": []map[string]interface{}{
+			{
+				"type": "text",
+				"text": text,
+			},
+		},
+	}
+}
+
+// addMetadata adds metadata to a response
+func addMetadata(resp map[string]interface{}, key string, value interface{}) map[string]interface{} {
+	if resp["metadata"] == nil {
+		resp["metadata"] = make(map[string]interface{})
+	}
+
+	metadata, ok := resp["metadata"].(map[string]interface{})
+	if !ok {
+		// Create a new metadata map if conversion fails
+		metadata = make(map[string]interface{})
+		resp["metadata"] = metadata
+	}
+
+	metadata[key] = value
+	return resp
+}
+
 // TODO: Refactor tool type implementations to reduce duplication and improve maintainability
 // TODO: Consider using a code generation approach for repetitive tool patterns
 // TODO: Add comprehensive request validation for all tool parameters
@@ -114,8 +143,7 @@ func (t *QueryTool) HandleRequest(ctx context.Context, request server.ToolCallRe
 		return nil, err
 	}
 
-	// Format response using the reusable response structure
-	return FromString(result), nil
+	return createTextResponse(result), nil
 }
 
 // extractDatabaseIDFromName extracts the database ID from a tool name
@@ -188,8 +216,7 @@ func (t *ExecuteTool) HandleRequest(ctx context.Context, request server.ToolCall
 		return nil, err
 	}
 
-	// Format response using the reusable response structure
-	return FromString(result), nil
+	return createTextResponse(result), nil
 }
 
 //------------------------------------------------------------------------------
@@ -249,12 +276,20 @@ func (t *TransactionTool) HandleRequest(ctx context.Context, request server.Tool
 
 	txID := ""
 	if request.Parameters["transactionId"] != nil {
-		txID, _ = request.Parameters["transactionId"].(string)
+		var ok bool
+		txID, ok = request.Parameters["transactionId"].(string)
+		if !ok {
+			return nil, fmt.Errorf("transactionId parameter must be a string")
+		}
 	}
 
 	statement := ""
 	if request.Parameters["statement"] != nil {
-		statement, _ = request.Parameters["statement"].(string)
+		var ok bool
+		statement, ok = request.Parameters["statement"].(string)
+		if !ok {
+			return nil, fmt.Errorf("statement parameter must be a string")
+		}
 	}
 
 	var params []interface{}
@@ -266,7 +301,11 @@ func (t *TransactionTool) HandleRequest(ctx context.Context, request server.Tool
 
 	readOnly := false
 	if request.Parameters["readOnly"] != nil {
-		readOnly, _ = request.Parameters["readOnly"].(bool)
+		var ok bool
+		readOnly, ok = request.Parameters["readOnly"].(bool)
+		if !ok {
+			return nil, fmt.Errorf("readOnly parameter must be a boolean")
+		}
 	}
 
 	message, metadata, err := useCase.ExecuteTransaction(ctx, dbID, action, txID, statement, params, readOnly)
@@ -275,11 +314,11 @@ func (t *TransactionTool) HandleRequest(ctx context.Context, request server.Tool
 	}
 
 	// Create response with text and metadata
-	resp := FromString(message)
+	resp := createTextResponse(message)
 
 	// Add metadata if provided
 	for k, v := range metadata {
-		resp.WithMetadata(k, v)
+		addMetadata(resp, k, v)
 	}
 
 	return resp, nil
@@ -349,7 +388,11 @@ func (t *PerformanceTool) HandleRequest(ctx context.Context, request server.Tool
 
 	query := ""
 	if request.Parameters["query"] != nil {
-		query, _ = request.Parameters["query"].(string)
+		var ok bool
+		query, ok = request.Parameters["query"].(string)
+		if !ok {
+			return nil, fmt.Errorf("query parameter must be a string")
+		}
 	}
 
 	var threshold int
@@ -375,7 +418,7 @@ func (t *PerformanceTool) HandleRequest(ctx context.Context, request server.Tool
 		output += fmt.Sprintf("Threshold: %d ms\n", threshold)
 	}
 
-	return FromString(output), nil
+	return createTextResponse(output), nil
 }
 
 //------------------------------------------------------------------------------
@@ -422,14 +465,8 @@ func (t *SchemaTool) HandleRequest(ctx context.Context, request server.ToolCallR
 	}
 
 	// Format response text
-	infoStr := fmt.Sprintf("Database Schema for %s:\n\n", dbID)
-	if schemaInfo, ok := info["schema"].(string); ok {
-		infoStr += schemaInfo
-	} else {
-		infoStr += fmt.Sprintf("%v", info)
-	}
-
-	return FromString(infoStr), nil
+	infoStr := fmt.Sprintf("Database Schema for %s:\n\n%+v", dbID, info)
+	return createTextResponse(infoStr), nil
 }
 
 //------------------------------------------------------------------------------
@@ -477,7 +514,7 @@ func (t *ListDatabasesTool) HandleRequest(ctx context.Context, request server.To
 		output += "No databases configured.\n"
 	}
 
-	return FromString(output), nil
+	return createTextResponse(output), nil
 }
 
 //------------------------------------------------------------------------------
@@ -513,57 +550,19 @@ func (f *ToolTypeFactory) Register(toolType ToolType) {
 
 // GetToolType returns a tool type by name
 func (f *ToolTypeFactory) GetToolType(name string) (ToolType, bool) {
-	// Handle the old MCP prefixed names for backward compatibility
-	if strings.HasPrefix(name, "mcp_") {
-		parts := strings.Split(name, "_")
-		if len(parts) < 4 {
-			// Not enough parts to match the expected pattern
-			return nil, false
-		}
-
-		// The tool type name should be the third part (index 2)
-		toolTypeName := parts[2]
-
-		// Check if this is a valid tool type
-		toolType, ok := f.toolTypes[toolTypeName]
+	// Handle new simpler format: <tooltype>_<dbID> or just the tool type name
+	parts := strings.Split(name, "_")
+	if len(parts) > 0 {
+		// First part is the tool type name
+		toolType, ok := f.toolTypes[parts[0]]
 		if ok {
 			return toolType, true
-		}
-
-		// Try to find a match for any of our known tool types
-		for _, typeName := range []string{"query", "execute", "transaction", "performance", "schema", "list_databases"} {
-			if containsString(parts, typeName) {
-				toolType, ok := f.toolTypes[typeName]
-				if ok {
-					return toolType, true
-				}
-			}
-		}
-	} else {
-		// Handle new simpler format: <tooltype>_<dbID> or just the tool type name
-		parts := strings.Split(name, "_")
-		if len(parts) > 0 {
-			// First part is the tool type name
-			toolType, ok := f.toolTypes[parts[0]]
-			if ok {
-				return toolType, true
-			}
 		}
 	}
 
 	// Direct tool type lookup
 	toolType, ok := f.toolTypes[name]
 	return toolType, ok
-}
-
-// containsString checks if a string slice contains a specific string
-func containsString(slice []string, search string) bool {
-	for _, item := range slice {
-		if item == search {
-			return true
-		}
-	}
-	return false
 }
 
 // GetToolTypeForSourceName finds the appropriate tool type for a source name
