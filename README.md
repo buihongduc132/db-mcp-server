@@ -489,9 +489,9 @@ The MCP server registers tools with names that match the format Cursor expects. 
 mcp_<servername>_<tooltype>_<dbID>
 ```
 
-For example: `mcp_cashflow_db_mcp_server_stdio_schema_cashflow_db`
+For example: `mcp_mysql1_db_mcp_server_stdio_schema_mysql1_db`
 
-The server uses the name `cashflow_db_mcp_server_stdio` by default, which should match your Cursor configuration in the `mcp.json` file.
+The server uses the name `mysql1_db_mcp_server_stdio` by default, which should match your Cursor configuration in the `mcp.json` file.
 
 ### Cursor Configuration
 
@@ -500,7 +500,7 @@ In your Cursor configuration (`~/.cursor/mcp.json`), you should have a configura
 ```json
 {
     "mcpServers": {
-        "cashflow-db-mcp-server-stdio": {
+        "multidb": {
             "command": "/path/to/db-mcp-server/server",
             "args": [
                 "-t",
@@ -514,3 +514,58 @@ In your Cursor configuration (`~/.cursor/mcp.json`), you should have a configura
 ```
 
 The server will automatically register tools with simple names that match the database identifiers in your configuration.
+
+### Using MCP Tools in Cursor
+
+Once your DB MCP Server is running and properly configured in Cursor, you can use the MCP tools in your AI assistant conversations. The tools follow this naming pattern:
+
+```
+mcp_<server_name>_<tool_type>_<database_id>
+```
+
+Where:
+- `<server_name>` is the name defined in your .cursor/mcp.json (e.g., "multidb")
+- `<tool_type>` is one of: query, execute, transaction, schema, performance, list_databases
+- `<database_id>` is the database ID from your configuration (not needed for list_databases)
+
+#### Examples:
+
+For a server named "multidb" with a database ID "mysql1":
+
+1. **Listing all databases**:
+```
+mcp_multidb_list_databases
+```
+
+2. **Querying the database**:
+```
+mcp_multidb_query_mysql1
+Query: SELECT * FROM users LIMIT 10
+```
+
+3. **Viewing database schema**:
+```
+mcp_multidb_schema_mysql1
+```
+
+4. **Executing statements**:
+```
+mcp_multidb_execute_mysql1
+Statement: INSERT INTO users (name, email) VALUES ('John Doe', 'john@example.com')
+```
+
+5. **Managing transactions**:
+```
+mcp_multidb_transaction_mysql1
+Action: begin
+```
+
+#### Troubleshooting MCP Tools in Cursor
+
+If the AI assistant can't call the MCP tools:
+
+1. Make sure the server is running (check with `ps aux | grep server`)
+2. Verify your .cursor/mcp.json configuration is correct
+3. Ensure the server_name in .env matches what's in your MCP tool calls
+4. Restart Cursor after making configuration changes
+5. Check the logs in the logs/ directory for any errors
