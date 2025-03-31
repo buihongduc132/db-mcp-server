@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -31,7 +32,43 @@ var (
 	// Default logger
 	zapLogger *zap.Logger
 	logLevel  Level
+	// Flag to indicate if we're in stdio mode
+	isStdioMode bool
+	// Log file for stdio mode
+	stdioLogFile *os.File
+	// Mutex to protect log file access
+	logMutex sync.Mutex
 )
+
+// safeStdioWriter is a writer that ensures no output goes to stdout in stdio mode
+type safeStdioWriter struct {
+	file *os.File
+}
+
+// Write implements io.Writer and filters all output in stdio mode
+func (w *safeStdioWriter) Write(p []byte) (n int, err error) {
+	// In stdio mode, write to the log file instead of stdout
+	logMutex.Lock()
+	defer logMutex.Unlock()
+
+	if stdioLogFile != nil {
+		return stdioLogFile.Write(p)
+	}
+
+	// Last resort: write to stderr, never stdout
+	return os.Stderr.Write(p)
+}
+
+// Sync implements zapcore.WriteSyncer
+func (w *safeStdioWriter) Sync() error {
+	logMutex.Lock()
+	defer logMutex.Unlock()
+
+	if stdioLogFile != nil {
+		return stdioLogFile.Sync()
+	}
+	return nil
+}
 
 // Initialize sets up the logger with the specified level
 func Initialize(level string) {
@@ -39,10 +76,10 @@ func Initialize(level string) {
 
 	// Check if we're in stdio mode
 	transportMode := os.Getenv("TRANSPORT_MODE")
-	if transportMode == "stdio" {
-		// In stdio mode, we need to avoid any JSON output to stdout
-		// That would interfere with JSON-RPC communications, but we
-		// must be careful not to break tool functionality
+	isStdioMode = transportMode == "stdio"
+
+	if isStdioMode {
+		// In stdio mode, we need to avoid ANY JSON output to stdout
 
 		// Create a log file in logs directory
 		logsDir := "logs"
@@ -54,33 +91,29 @@ func Initialize(level string) {
 		logFileName := filepath.Join(logsDir, fmt.Sprintf("mcp-logger-%s.log", timestamp))
 
 		// Try to create the log file
-		logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err == nil {
-			// Successfully created log file, initialize with a non-JSON console encoder
-			// to make the log more readable for debugging
+		var err error
+		stdioLogFile, err = os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			// If we can't create a log file, we'll use a null logger
+			fmt.Fprintf(os.Stderr, "Failed to create log file: %v - all logs will be suppressed\n", err)
+		} else {
+			// Write initial log message to stderr only (as a last message before full redirection)
+			fmt.Fprintf(os.Stderr, "Stdio mode detected - all logs redirected to: %s\n", logFileName)
+
+			// Create a custom writer that never writes to stdout
+			safeWriter := &safeStdioWriter{file: stdioLogFile}
+
+			// Create a development encoder for more readable logs
 			encoderConfig := zap.NewDevelopmentEncoderConfig()
+			encoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
 			encoder := zapcore.NewConsoleEncoder(encoderConfig)
 
-			// Create a multi-writer core that writes to both stderr and the log file
-			// This maintains both file logging and compatibility with tools that
-			// might expect stderr to be available
-			stderr := zapcore.Lock(os.Stderr)
-			fileSync := zapcore.AddSync(logFile)
+			// Create core that writes to our safe writer
+			core := zapcore.NewCore(encoder, zapcore.AddSync(safeWriter), getZapLevel(logLevel))
 
-			core := zapcore.NewTee(
-				// File logger with all messages
-				zapcore.NewCore(encoder, fileSync, getZapLevel(logLevel)),
-				// Stderr logger with only warnings and errors
-				zapcore.NewCore(encoder, stderr, zap.NewAtomicLevelAt(zapcore.WarnLevel)),
-			)
-
+			// Create the logger with the core
 			zapLogger = zap.New(core)
-			zapLogger.Info("Logger initialized in stdio mode, writing full logs to file",
-				zap.String("filename", logFileName))
 			return
-		} else {
-			// Fall back to stderr if we can't create a log file
-			fmt.Fprintf(os.Stderr, "Failed to create log file: %v\n", err)
 		}
 	}
 
@@ -89,9 +122,10 @@ func Initialize(level string) {
 	config.EncoderConfig.TimeKey = "time"
 	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 
-	// In stdio mode, always use stderr to avoid contaminating stdout
-	if transportMode == "stdio" {
-		config.OutputPaths = []string{"stderr"}
+	// In stdio mode with no log file, use a no-op logger to avoid any stdout output
+	if isStdioMode {
+		zapLogger = zap.NewNop()
+		return
 	} else {
 		config.OutputPaths = []string{"stdout"}
 	}
@@ -101,8 +135,7 @@ func Initialize(level string) {
 	var err error
 	zapLogger, err = config.Build()
 	if err != nil {
-		// If Zap logger cannot be built, fall back to standard logger
-		fmt.Printf("Failed to initialize zap logger: %v. Falling back to standard logger.\n", err)
+		// If Zap logger cannot be built, fall back to noop logger
 		zapLogger = zap.NewNop()
 	}
 }
