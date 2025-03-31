@@ -254,18 +254,40 @@ func main() {
 	case "stdio":
 		logger.Info("Starting STDIO server")
 
-		// Set logging mode based on configuration
-		if cfg.DisableLogging {
-			logger.Info("Logging in STDIO transport is disabled")
-			// Set environment variable to signal to the MCP library to disable logging
-			if err := os.Setenv("MCP_DISABLE_LOGGING", "true"); err != nil {
-				logger.Warn("Warning: failed to set MCP_DISABLE_LOGGING env: %v", err)
-			}
+		// Create logs directory if not exists
+		logsDir := "logs"
+		if err := os.MkdirAll(logsDir, 0755); err != nil {
+			logger.Warn("Failed to create logs directory: %v", err)
 		}
+
+		// In stdio mode, we need to ensure logs don't interfere with stdout
+		// but we can't redirect stderr completely as it breaks MCP tools
+		logFileName := fmt.Sprintf("mcp-stdio-%s.log", time.Now().Format("20060102-150405"))
+		logFilePath := filepath.Join(logsDir, logFileName)
+
+		// Try to open the log file for additional debugging
+		logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			logger.Error("Failed to open log file %s: %v", logFilePath, err)
+		} else {
+			// We don't redirect stderr completely as that breaks tools
+			// Just log the start to both stderr and the file
+			msg := fmt.Sprintf("Starting stdio server, debug logs at: %s\n", logFilePath)
+			fmt.Fprintf(os.Stderr, msg)
+			logFile.WriteString(msg)
+
+			// Close the file since we're not redirecting stderr to it
+			// The logger will handle its own file output
+			logFile.Close()
+		}
+
+		// We're not setting MCP_DISABLE_LOGGING as that might affect tool functionality
+		// Instead, we rely on our logger redirect to file when in stdio mode
 
 		// No graceful shutdown needed for stdio
 		if err := mcpServer.ServeStdio(); err != nil {
 			logger.Error("STDIO server error: %v", err)
+			os.Exit(1)
 		}
 
 	default:
