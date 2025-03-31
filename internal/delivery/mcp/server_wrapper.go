@@ -2,10 +2,10 @@ package mcp
 
 import (
 	"context"
-	"log"
 
 	"github.com/FreePeak/cortex/pkg/server"
 	"github.com/FreePeak/cortex/pkg/types"
+	"github.com/FreePeak/db-mcp-server/internal/logger"
 )
 
 // ServerWrapper provides a wrapper around server.MCPServer to handle type assertions
@@ -23,12 +23,12 @@ func NewServerWrapper(mcpServer *server.MCPServer) *ServerWrapper {
 // AddTool adds a tool to the server
 func (sw *ServerWrapper) AddTool(ctx context.Context, tool interface{}, handler func(ctx context.Context, request server.ToolCallRequest) (interface{}, error)) error {
 	// Log the operation for debugging
-	log.Printf("Adding tool: %T", tool)
+	logger.Debug("Adding tool: %T", tool)
 
 	// Cast the tool to the expected type (*types.Tool)
 	typedTool, ok := tool.(*types.Tool)
 	if !ok {
-		log.Printf("Warning: Tool is not of type *types.Tool: %T", tool)
+		logger.Warn("Warning: Tool is not of type *types.Tool: %T", tool)
 		return nil
 	}
 

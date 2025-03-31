@@ -67,6 +67,7 @@ type UseCaseProvider interface {
 	ExecuteTransaction(ctx context.Context, dbID, action string, txID string, statement string, params []interface{}, readOnly bool) (string, map[string]interface{}, error)
 	GetDatabaseInfo(dbID string) (map[string]interface{}, error)
 	ListDatabases() []string
+	GetDatabaseType(dbID string) (string, error)
 }
 
 // BaseToolType provides common functionality for tool types
