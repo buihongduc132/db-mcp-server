@@ -459,3 +459,37 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 alt="Buy Me A Coffee"/>
 </a>
 </p>
+
+## Tool Naming Convention
+
+Tools are registered with simple, straightforward names based on the tool type and database ID:
+
+```
+<tooltype>_<dbID>
+```
+
+For example: `query_mysql1`, `schema_postgres1`, or just `list_databases` for the database listing tool.
+
+These simple names make it easier for clients to use the tools directly, without complex prefixes or unnecessary duplication.
+
+## Cursor Integration
+
+### Cursor Configuration
+
+In your Cursor configuration (`~/.cursor/mcp.json`), you should have a configuration like:
+
+```json
+{
+    "mcpServers": {
+        "db-mcp-server-stdio": {
+            "command": "/path/to/db-mcp-server/server",
+            "args": [
+                "-t",
+                "stdio",
+                "-c",
+                "/path/to/database_config.json"
+            ]
+        }
+    }
+}
+```

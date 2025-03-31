@@ -92,6 +92,11 @@ func (t *QueryTool) CreateTool(name string, dbID string) interface{} {
 
 // HandleRequest handles query tool requests
 func (t *QueryTool) HandleRequest(ctx context.Context, request server.ToolCallRequest, dbID string, useCase UseCaseProvider) (interface{}, error) {
+	// If dbID is not provided, extract it from the tool name
+	if dbID == "" {
+		dbID = extractDatabaseIDFromName(request.Name)
+	}
+
 	query, ok := request.Parameters["query"].(string)
 	if !ok {
 		return nil, fmt.Errorf("query parameter must be a string")
@@ -111,6 +116,18 @@ func (t *QueryTool) HandleRequest(ctx context.Context, request server.ToolCallRe
 
 	// Format response using the reusable response structure
 	return FromString(result), nil
+}
+
+// extractDatabaseIDFromName extracts the database ID from a tool name
+func extractDatabaseIDFromName(name string) string {
+	// Format is: <tooltype>_<dbID>
+	parts := strings.Split(name, "_")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	// The database ID is the last part
+	return parts[len(parts)-1]
 }
 
 //------------------------------------------------------------------------------
@@ -149,6 +166,11 @@ func (t *ExecuteTool) CreateTool(name string, dbID string) interface{} {
 
 // HandleRequest handles execute tool requests
 func (t *ExecuteTool) HandleRequest(ctx context.Context, request server.ToolCallRequest, dbID string, useCase UseCaseProvider) (interface{}, error) {
+	// If dbID is not provided, extract it from the tool name
+	if dbID == "" {
+		dbID = extractDatabaseIDFromName(request.Name)
+	}
+
 	statement, ok := request.Parameters["statement"].(string)
 	if !ok {
 		return nil, fmt.Errorf("statement parameter must be a string")
@@ -215,6 +237,11 @@ func (t *TransactionTool) CreateTool(name string, dbID string) interface{} {
 
 // HandleRequest handles transaction tool requests
 func (t *TransactionTool) HandleRequest(ctx context.Context, request server.ToolCallRequest, dbID string, useCase UseCaseProvider) (interface{}, error) {
+	// If dbID is not provided, extract it from the tool name
+	if dbID == "" {
+		dbID = extractDatabaseIDFromName(request.Name)
+	}
+
 	action, ok := request.Parameters["action"].(string)
 	if !ok {
 		return nil, fmt.Errorf("action parameter must be a string")
@@ -300,6 +327,11 @@ func (t *PerformanceTool) CreateTool(name string, dbID string) interface{} {
 
 // HandleRequest handles performance tool requests
 func (t *PerformanceTool) HandleRequest(ctx context.Context, request server.ToolCallRequest, dbID string, useCase UseCaseProvider) (interface{}, error) {
+	// If dbID is not provided, extract it from the tool name
+	if dbID == "" {
+		dbID = extractDatabaseIDFromName(request.Name)
+	}
+
 	// This is a simplified implementation
 	// In a real implementation, this would analyze query performance
 
@@ -379,6 +411,11 @@ func (t *SchemaTool) CreateTool(name string, dbID string) interface{} {
 
 // HandleRequest handles schema tool requests
 func (t *SchemaTool) HandleRequest(ctx context.Context, request server.ToolCallRequest, dbID string, useCase UseCaseProvider) (interface{}, error) {
+	// If dbID is not provided, extract it from the tool name
+	if dbID == "" {
+		dbID = extractDatabaseIDFromName(request.Name)
+	}
+
 	info, err := useCase.GetDatabaseInfo(dbID)
 	if err != nil {
 		return nil, err
@@ -476,35 +513,82 @@ func (f *ToolTypeFactory) Register(toolType ToolType) {
 
 // GetToolType returns a tool type by name
 func (f *ToolTypeFactory) GetToolType(name string) (ToolType, bool) {
-	// Handle full tool names with database IDs (e.g., "query_mysql1")
-	if strings.Contains(name, "_") {
+	// Handle the old MCP prefixed names for backward compatibility
+	if strings.HasPrefix(name, "mcp_") {
 		parts := strings.Split(name, "_")
-		name = parts[0]
+		if len(parts) < 4 {
+			// Not enough parts to match the expected pattern
+			return nil, false
+		}
+
+		// The tool type name should be the third part (index 2)
+		toolTypeName := parts[2]
+
+		// Check if this is a valid tool type
+		toolType, ok := f.toolTypes[toolTypeName]
+		if ok {
+			return toolType, true
+		}
+
+		// Try to find a match for any of our known tool types
+		for _, typeName := range []string{"query", "execute", "transaction", "performance", "schema", "list_databases"} {
+			if containsString(parts, typeName) {
+				toolType, ok := f.toolTypes[typeName]
+				if ok {
+					return toolType, true
+				}
+			}
+		}
+	} else {
+		// Handle new simpler format: <tooltype>_<dbID> or just the tool type name
+		parts := strings.Split(name, "_")
+		if len(parts) > 0 {
+			// First part is the tool type name
+			toolType, ok := f.toolTypes[parts[0]]
+			if ok {
+				return toolType, true
+			}
+		}
 	}
 
+	// Direct tool type lookup
 	toolType, ok := f.toolTypes[name]
 	return toolType, ok
 }
 
+// containsString checks if a string slice contains a specific string
+func containsString(slice []string, search string) bool {
+	for _, item := range slice {
+		if item == search {
+			return true
+		}
+	}
+	return false
+}
+
 // GetToolTypeForSourceName finds the appropriate tool type for a source name
 func (f *ToolTypeFactory) GetToolTypeForSourceName(sourceName string) (ToolType, string, bool) {
-	// Special case for list_databases which doesn't follow the pattern
+	// Handle simpler format: <tooltype>_<dbID>
+	parts := strings.Split(sourceName, "_")
+
+	if len(parts) >= 2 {
+		// First part is tool type, last part is dbID
+		toolTypeName := parts[0]
+		dbID := parts[len(parts)-1]
+
+		toolType, ok := f.toolTypes[toolTypeName]
+		if ok {
+			return toolType, dbID, true
+		}
+	}
+
+	// Handle case for global tools
 	if sourceName == "list_databases" {
 		toolType, ok := f.toolTypes["list_databases"]
 		return toolType, "", ok
 	}
 
-	// Split the source name into tool type and database ID
-	parts := strings.Split(sourceName, "_")
-	if len(parts) < 2 {
-		return nil, "", false
-	}
-
-	toolTypeName := parts[0]
-	dbID := parts[1]
-
-	toolType, ok := f.toolTypes[toolTypeName]
-	return toolType, dbID, ok
+	return nil, "", false
 }
 
 // GetAllToolTypes returns all registered tool types
