@@ -115,9 +115,15 @@ The quickest way to get started is with Docker:
 # Pull the latest image
 docker pull freepeak/db-mcp-server:latest
 
-# Run with your config mounted
-docker run -p 9092:9092 -v $(pwd)/config.json:/app/config.json freepeak/db-mcp-server -t sse -c /app/config.json
+# Run with your config mounted (IMPORTANT: use -- to separate Docker flags from application arguments)
+docker run -p 9092:9092 -v $(pwd)/config.json:/app/config.json freepeak/db-mcp-server -- -t sse -c /app/config.json
+
+# Alternative method using longer argument names to avoid Docker flag conflicts
+docker run -p 9092:9092 -v $(pwd)/config.json:/app/config.json freepeak/db-mcp-server --transport sse --config /app/config.json
 ```
+
+> **Note**: The `--` separator is crucial as Docker's `-t` flag conflicts with our server's `-t` transport flag.
+> If you encounter platform mismatch warnings, you can specify the platform: `--platform linux/amd64` or `--platform linux/arm64`.
 
 ### From Source
 
@@ -192,7 +198,9 @@ services:
       - "9092:9092"
     volumes:
       - ./config.json:/app/config.json
-    command: ["-t", "sse", "-c", "/app/config.json"]
+    # Use array format with -- separator to avoid flag conflicts
+    command: ["--", "-t", "sse", "-c", "/app/config.json"]
+    # Alternative: command: ["--transport", "sse", "--config", "/app/config.json"]
     depends_on:
       - mysql
       - postgres
@@ -438,6 +446,7 @@ We're committed to expanding DB MCP Server to support a wide range of database s
 1. **Connection Errors**: Verify your database connection settings in `config.json`
 2. **Tool Not Found**: Ensure the server is running and check tool name prefixes
 3. **Failed Queries**: Check your SQL syntax and database permissions
+4. **Docker Command Errors**: If you see errors like `executable file not found in $PATH` when running Docker, it's likely because Docker is interpreting `-t` as its own flag. Use `--` to separate Docker flags from application arguments: `docker run ... freepeak/db-mcp-server -- -t sse ...` or use full argument names: `docker run ... freepeak/db-mcp-server --transport sse ...`
 
 ### Logs
 
