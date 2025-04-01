@@ -115,14 +115,28 @@ The quickest way to get started is with Docker:
 # Pull the latest image
 docker pull freepeak/db-mcp-server:latest
 
-# Run with your config mounted (IMPORTANT: use -- to separate Docker flags from application arguments)
-docker run -p 9092:9092 -v $(pwd)/config.json:/app/config.json freepeak/db-mcp-server -- -t sse -c /app/config.json
+# Option 1: Run with environment variables (recommended)
+docker run -p 9092:9092 \
+  -v $(pwd)/config.json:/app/my-config.json \
+  -e TRANSPORT_MODE=sse \
+  -e CONFIG_PATH=/app/my-config.json \
+  freepeak/db-mcp-server
 
-# Alternative method using longer argument names to avoid Docker flag conflicts
-docker run -p 9092:9092 -v $(pwd)/config.json:/app/config.json freepeak/db-mcp-server --transport sse --config /app/config.json
+# Option 2: Override the entrypoint
+docker run -p 9092:9092 \
+  -v $(pwd)/config.json:/app/my-config.json \
+  --entrypoint /app/server \
+  freepeak/db-mcp-server \
+  -t sse -c /app/my-config.json
+
+# Option 3: Use shell to execute the command
+docker run -p 9092:9092 \
+  -v $(pwd)/config.json:/app/my-config.json \
+  freepeak/db-mcp-server \
+  /bin/sh -c "/app/server -t sse -c /app/my-config.json"
 ```
 
-> **Note**: The `--` separator is crucial as Docker's `-t` flag conflicts with our server's `-t` transport flag.
+> **Note**: We mount to `/app/my-config.json` because the container already has a file at `/app/config.json`.
 > If you encounter platform mismatch warnings, you can specify the platform: `--platform linux/amd64` or `--platform linux/arm64`.
 
 ### From Source
@@ -197,10 +211,13 @@ services:
     ports:
       - "9092:9092"
     volumes:
-      - ./config.json:/app/config.json
-    # Use array format with -- separator to avoid flag conflicts
-    command: ["--", "-t", "sse", "-c", "/app/config.json"]
-    # Alternative: command: ["--transport", "sse", "--config", "/app/config.json"]
+      - ./config.json:/app/my-config.json
+    environment:
+      - TRANSPORT_MODE=sse
+      - CONFIG_PATH=/app/my-config.json
+    # Alternative using entrypoint
+    # entrypoint: ["/app/server"]
+    # command: ["-t", "sse", "-c", "/app/my-config.json"]
     depends_on:
       - mysql
       - postgres
@@ -446,7 +463,11 @@ We're committed to expanding DB MCP Server to support a wide range of database s
 1. **Connection Errors**: Verify your database connection settings in `config.json`
 2. **Tool Not Found**: Ensure the server is running and check tool name prefixes
 3. **Failed Queries**: Check your SQL syntax and database permissions
-4. **Docker Command Errors**: If you see errors like `executable file not found in $PATH` when running Docker, it's likely because Docker is interpreting `-t` as its own flag. Use `--` to separate Docker flags from application arguments: `docker run ... freepeak/db-mcp-server -- -t sse ...` or use full argument names: `docker run ... freepeak/db-mcp-server --transport sse ...`
+4. **Docker Volume Mount Errors**: If you see errors like `mountpoint for /app/config.json: not a directory`, it's because the container already has a file at that path. Mount to a different path (e.g., `/app/my-config.json`) and update your configuration accordingly.
+5. **Docker Command Errors**: If you encounter command-related errors with Docker, use one of these approaches:
+   - Use environment variables: `-e TRANSPORT_MODE=sse -e CONFIG_PATH=/app/my-config.json`
+   - Override the entrypoint: `--entrypoint /app/server freepeak/db-mcp-server -t sse -c /app/my-config.json`
+   - Use shell execution: `freepeak/db-mcp-server /bin/sh -c "/app/server -t sse -c /app/my-config.json"`
 
 ### Logs
 
