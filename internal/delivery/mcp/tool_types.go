@@ -116,6 +116,7 @@ func (t *QueryTool) CreateTool(name string, dbID string) interface{} {
 		),
 		tools.WithArray("params",
 			tools.Description("Query parameters"),
+			tools.Items(map[string]interface{}{"type": "string"}),
 		),
 	)
 }
@@ -189,6 +190,7 @@ func (t *ExecuteTool) CreateTool(name string, dbID string) interface{} {
 		),
 		tools.WithArray("params",
 			tools.Description("Statement parameters"),
+			tools.Items(map[string]interface{}{"type": "string"}),
 		),
 	)
 }
@@ -256,6 +258,7 @@ func (t *TransactionTool) CreateTool(name string, dbID string) interface{} {
 		),
 		tools.WithArray("params",
 			tools.Description("Statement parameters"),
+			tools.Items(map[string]interface{}{"type": "string"}),
 		),
 		tools.WithBoolean("readOnly",
 			tools.Description("Whether the transaction is read-only (for begin)"),

@@ -88,6 +88,7 @@ The server follows Clean Architecture principles with these layers:
 - **Simultaneous Multi-Database Support**: Connect to and interact with multiple MySQL and PostgreSQL databases concurrently
 - **Database-Specific Tool Generation**: Auto-creates specialized tools for each connected database
 - **Clean Architecture**: Modular design with clear separation of concerns
+- **OpenAI Agents SDK Compatibility**: Full compatibility with the OpenAI Agents SDK for seamless integration with AI assistants
 - **Dynamic Database Tools**: 
   - Execute SQL queries with parameters
   - Run data modification statements with proper error handling
@@ -569,3 +570,81 @@ If the AI assistant can't call the MCP tools:
 3. Ensure the server_name in .env matches what's in your MCP tool calls
 4. Restart Cursor after making configuration changes
 5. Check the logs in the logs/ directory for any errors
+
+## OpenAI Agents SDK Integration
+
+The DB MCP Server fully supports OpenAI's Agents SDK, allowing you to create AI agents that can interact with databases directly.
+
+### Prerequisites
+
+- OpenAI account with API access
+- OpenAI Agents SDK installed: `pip install openai-agents`
+- A running DB MCP Server instance (SSE mode)
+
+### Basic Integration Example
+
+Here's how to integrate the DB MCP Server with an OpenAI Agent:
+
+```python
+from openai import OpenAI
+from agents.agent import Agent, ModelSettings
+from agents.tools.mcp_server import MCPServerSse, MCPServerSseParams
+
+# Connect to the MCP server
+db_server = MCPServerSse(
+    params=MCPServerSseParams(
+        url="http://localhost:9095/sse",  # URL to your running DB MCP server
+        schema={
+            "params": {
+                "type": "array", 
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "parameters": {"type": "object"}
+                    }
+                }
+            }
+        }
+    ),
+)
+
+# Create the agent with access to database tools
+agent = Agent(
+    name="Database Agent",
+    model="gpt-4o",
+    model_settings=ModelSettings(temperature=0.1),
+    instructions="""
+    You are a database helper agent. You can execute SQL queries,
+    manage database transactions, and explore schema information.
+    """,
+    mcp_servers=[db_server],
+)
+
+# Now the agent can be used to interact with your databases through the OpenAI API
+```
+
+### Testing Your Integration
+
+The repository includes a test script to verify compatibility with the OpenAI Agents SDK:
+
+```bash
+# Run the test script
+./test_tools/openai-agent-sdk-test/run_test.sh
+```
+
+The script will:
+1. Build the server with the latest changes
+2. Start the server if it's not already running
+3. Test the connection with the OpenAI Agents SDK
+4. Report if the integration is working correctly
+
+### Troubleshooting Agents SDK Integration
+
+If you encounter issues:
+
+1. Ensure the server is running in SSE mode on the expected port
+2. Check that your OpenAI API key is set as an environment variable
+3. Verify that your agent's instructions mention the database tools specifically
+4. Inspect the server logs for any error messages

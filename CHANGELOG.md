@@ -1,11 +1,21 @@
 # Changelog
 
-## [0.2.1] - 2023-03-31
+## [v1.6.1] - 2025-04-01
+
+### Added
+- OpenAI Agents SDK compatibility by adding Items property to array parameters
+- Test script for verifying OpenAI Agents SDK compatibility
+
+### Fixed
+- Issue #8: Array parameters in tool definitions now include required `items` property
+- JSON Schema validation errors in OpenAI Agents SDK integration
+
+## [v1.6.0] - 2023-03-31
 
 ### Changed
 - Upgraded cortex dependency from v1.0.3 to v1.0.4
 
-## [0.2.0] - 2023-03-31
+## [] - 2023-03-31
 
 ### Added
 - Internal logging system for improved debugging and monitoring
@@ -16,7 +26,7 @@
 - Restored functionality for all MCP tools
 - Eliminated non-JSON RPC logging in stdio mode
 
-## [0.1.0] - 2023-03-25
+## [] - 2023-03-25
 
 ### Added
 - Initial release of DB MCP Server
