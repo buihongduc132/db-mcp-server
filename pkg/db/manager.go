@@ -1,10 +1,10 @@
 package db
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/FreePeak/db-mcp-server/pkg/logger"
 )
@@ -18,6 +18,22 @@ type DatabaseConnectionConfig struct {
 	User     string `json:"user"`
 	Password string `json:"password"`
 	Name     string `json:"name"`
+
+	// PostgreSQL specific options
+	SSLMode            string            `json:"ssl_mode,omitempty"`
+	SSLCert            string            `json:"ssl_cert,omitempty"`
+	SSLKey             string            `json:"ssl_key,omitempty"`
+	SSLRootCert        string            `json:"ssl_root_cert,omitempty"`
+	ApplicationName    string            `json:"application_name,omitempty"`
+	ConnectTimeout     int               `json:"connect_timeout,omitempty"`
+	TargetSessionAttrs string            `json:"target_session_attrs,omitempty"`
+	Options            map[string]string `json:"options,omitempty"`
+
+	// Connection pool settings
+	MaxOpenConns    int `json:"max_open_conns,omitempty"`
+	MaxIdleConns    int `json:"max_idle_conns,omitempty"`
+	ConnMaxLifetime int `json:"conn_max_lifetime_seconds,omitempty"`  // in seconds
+	ConnMaxIdleTime int `json:"conn_max_idle_time_seconds,omitempty"` // in seconds
 }
 
 // MultiDBConfig represents the configuration for multiple database connections
@@ -66,11 +82,14 @@ func (m *Manager) Connect() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var connectErrors []error
-	totalConfigs := len(m.configs)
-	successfulConnections := 0
-
+	// Connect to each database
 	for id, cfg := range m.configs {
+		// Skip if already connected
+		if _, exists := m.connections[id]; exists {
+			continue
+		}
+
+		// Create database configuration
 		dbConfig := Config{
 			Type:     cfg.Type,
 			Host:     cfg.Host,
@@ -80,94 +99,156 @@ func (m *Manager) Connect() error {
 			Name:     cfg.Name,
 		}
 
+		// Set PostgreSQL-specific options if this is a PostgreSQL database
+		if cfg.Type == "postgres" {
+			dbConfig.SSLMode = PostgresSSLMode(cfg.SSLMode)
+			dbConfig.SSLCert = cfg.SSLCert
+			dbConfig.SSLKey = cfg.SSLKey
+			dbConfig.SSLRootCert = cfg.SSLRootCert
+			dbConfig.ApplicationName = cfg.ApplicationName
+			dbConfig.ConnectTimeout = cfg.ConnectTimeout
+			dbConfig.TargetSessionAttrs = cfg.TargetSessionAttrs
+			dbConfig.Options = cfg.Options
+		}
+
+		// Connection pool settings
+		if cfg.MaxOpenConns > 0 {
+			dbConfig.MaxOpenConns = cfg.MaxOpenConns
+		}
+		if cfg.MaxIdleConns > 0 {
+			dbConfig.MaxIdleConns = cfg.MaxIdleConns
+		}
+		if cfg.ConnMaxLifetime > 0 {
+			dbConfig.ConnMaxLifetime = time.Duration(cfg.ConnMaxLifetime) * time.Second
+		}
+		if cfg.ConnMaxIdleTime > 0 {
+			dbConfig.ConnMaxIdleTime = time.Duration(cfg.ConnMaxIdleTime) * time.Second
+		}
+
 		// Create and connect to database
 		db, err := NewDatabase(dbConfig)
 		if err != nil {
-			errMsg := fmt.Errorf("failed to create database instance for %s: %w", id, err)
-			connectErrors = append(connectErrors, errMsg)
-			logger.Error("Error: %v", errMsg)
-			continue
+			return fmt.Errorf("failed to create database instance for %s: %w", id, err)
 		}
 
 		if err := db.Connect(); err != nil {
-			errMsg := fmt.Errorf("failed to connect to database %s: %w", id, err)
-			connectErrors = append(connectErrors, errMsg)
-			logger.Error("Error: %v", errMsg)
-			continue
+			return fmt.Errorf("failed to connect to database %s: %w", id, err)
 		}
 
-		// Store successful connection
+		// Store connected database
 		m.connections[id] = db
-		successfulConnections++
-	}
-
-	// Report connection status
-	if successfulConnections == 0 && len(connectErrors) > 0 {
-		return fmt.Errorf("failed to connect to any database: %v", connectErrors)
-	}
-
-	if len(connectErrors) > 0 {
-		logger.Warn("Warning: Connected to %d/%d databases. %d failed: %v",
-			successfulConnections, totalConfigs, len(connectErrors), connectErrors)
-	} else {
-		logger.Info("Successfully connected to all %d databases", successfulConnections)
+		logger.Info("Connected to database %s (%s at %s:%d/%s)", id, cfg.Type, cfg.Host, cfg.Port, cfg.Name)
 	}
 
 	return nil
 }
 
-// GetDB returns a database connection by its ID
-func (m *Manager) GetDB(id string) (Database, error) {
+// GetDatabase retrieves a database connection by ID
+func (m *Manager) GetDatabase(id string) (Database, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	// Check if the database exists
 	db, exists := m.connections[id]
 	if !exists {
 		return nil, fmt.Errorf("database connection %s not found", id)
 	}
+
 	return db, nil
 }
 
-// ListDatabases returns a list of all available database connections
+// GetDatabaseType returns the type of a database by its ID
+func (m *Manager) GetDatabaseType(id string) (string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Check if the database configuration exists
+	cfg, exists := m.configs[id]
+	if !exists {
+		return "", fmt.Errorf("database configuration %s not found", id)
+	}
+
+	return cfg.Type, nil
+}
+
+// CloseAll closes all database connections
+func (m *Manager) CloseAll() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var firstErr error
+
+	// Close each database connection
+	for id, db := range m.connections {
+		if err := db.Close(); err != nil {
+			logger.Error("Failed to close database %s: %v", id, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+		delete(m.connections, id)
+	}
+
+	return firstErr
+}
+
+// Close closes a specific database connection
+func (m *Manager) Close(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if the database exists
+	db, exists := m.connections[id]
+	if !exists {
+		return fmt.Errorf("database connection %s not found", id)
+	}
+
+	// Close the connection
+	if err := db.Close(); err != nil {
+		return fmt.Errorf("failed to close database %s: %w", id, err)
+	}
+
+	// Remove from connections map
+	delete(m.connections, id)
+
+	return nil
+}
+
+// ListDatabases returns a list of all configured databases
 func (m *Manager) ListDatabases() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	var dbs []string
-	for id := range m.connections {
-		dbs = append(dbs, id)
+	ids := make([]string, 0, len(m.configs))
+	for id := range m.configs {
+		ids = append(ids, id)
 	}
-	return dbs
+
+	return ids
 }
 
-// Close closes all database connections
-func (m *Manager) Close() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var errs []error
-	for id, db := range m.connections {
-		if err := db.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to close database %s: %w", id, err))
-		}
-	}
-
-	m.connections = make(map[string]Database)
-
-	if len(errs) > 0 {
-		return fmt.Errorf("errors closing databases: %v", errs)
-	}
-	return nil
-}
-
-// Ping checks if all database connections are alive
-func (m *Manager) Ping(ctx context.Context) map[string]error {
+// GetConnectedDatabases returns a list of all connected databases
+func (m *Manager) GetConnectedDatabases() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	results := make(map[string]error)
-	for id, db := range m.connections {
-		results[id] = db.Ping(ctx)
+	ids := make([]string, 0, len(m.connections))
+	for id := range m.connections {
+		ids = append(ids, id)
 	}
-	return results
+
+	return ids
+}
+
+// GetDatabaseConfig returns the configuration for a specific database
+func (m *Manager) GetDatabaseConfig(id string) (DatabaseConnectionConfig, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cfg, exists := m.configs[id]
+	if !exists {
+		return DatabaseConnectionConfig{}, fmt.Errorf("database configuration %s not found", id)
+	}
+
+	return cfg, nil
 }
