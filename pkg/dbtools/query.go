@@ -68,7 +68,7 @@ func handleQuery(ctx context.Context, params map[string]interface{}) (interface{
 	}
 
 	// Get database instance
-	db, err := dbManager.GetDB(databaseID)
+	db, err := dbManager.GetDatabase(databaseID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database: %w", err)
 	}

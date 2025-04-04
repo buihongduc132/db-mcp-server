@@ -44,8 +44,8 @@ ENV CONFIG_PATH=/app/config.json
 # Expose server port
 EXPOSE 9092
 
-# Provide a volume for configuration and logs
-VOLUME ["/app/config.json", "/app/logs"]
+# Provide a volume for logs only
+VOLUME ["/app/logs"]
 
 # Start the MCP server with proper configuration
 CMD ["/bin/bash", "-c", "/app/server -t ${TRANSPORT_MODE} -p ${SERVER_PORT} -c ${CONFIG_PATH}"]
