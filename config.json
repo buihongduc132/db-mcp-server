@@ -43,9 +43,9 @@
       "conn_max_idle_time_seconds": 60
     },
     {
-      "id": "postgres17",
+      "id": "postgres2",
       "type": "postgres",
-      "host": "postgres17",
+      "host": "postgres2",
       "port": 5432,
       "name": "db2",
       "user": "user2",
