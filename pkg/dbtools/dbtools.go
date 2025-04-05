@@ -194,7 +194,7 @@ func CloseDatabase() error {
 	if dbManager == nil {
 		return nil
 	}
-	return dbManager.Close()
+	return dbManager.CloseAll()
 }
 
 // GetDatabase returns a database instance by ID
@@ -202,7 +202,7 @@ func GetDatabase(id string) (db.Database, error) {
 	if dbManager == nil {
 		return nil, fmt.Errorf("database manager not initialized")
 	}
-	return dbManager.GetDB(id)
+	return dbManager.GetDatabase(id)
 }
 
 // ListDatabases returns a list of available database connections

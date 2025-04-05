@@ -1,18 +1,30 @@
 # Database Package
 
-This package provides a unified database interface that works with both MySQL and PostgreSQL databases. It handles connection management, pooling, and query execution.
+This package provides a unified database interface that works with both MySQL and PostgreSQL databases, including PostgreSQL 17. It handles connection management, pooling, and query execution.
 
 ## Features
 
-- Unified interface for MySQL and PostgreSQL
+- Unified interface for MySQL and PostgreSQL (all versions)
+- Comprehensive PostgreSQL connection options for compatibility with all versions
 - Connection pooling with configurable parameters
 - Context-aware query execution with timeout support
 - Transaction support
 - Proper error handling
 
-## Usage
+## PostgreSQL Version Compatibility
 
-### Configuration
+This package is designed to be compatible with all PostgreSQL versions, including:
+- PostgreSQL 10+
+- PostgreSQL 14+
+- PostgreSQL 15+
+- PostgreSQL 16+
+- PostgreSQL 17
+
+The connection string builder automatically adapts to specific PostgreSQL version requirements.
+
+## Configuration Options
+
+### Basic Configuration
 
 Configure the database connection using the `Config` struct:
 
@@ -30,6 +42,72 @@ cfg := db.Config{
     ConnMaxIdleTime: 5 * time.Minute,
 }
 ```
+
+### PostgreSQL-Specific Options
+
+For PostgreSQL databases, additional options are available:
+
+```go
+cfg := db.Config{
+    Type:            "postgres",
+    Host:            "localhost",
+    Port:            5432,
+    User:            "user",
+    Password:        "password",
+    Name:            "dbname",
+    
+    // PostgreSQL-specific options
+    SSLMode:          db.SSLPrefer,                   // SSL mode (disable, prefer, require, verify-ca, verify-full)
+    SSLCert:          "/path/to/client-cert.pem",     // Client certificate file
+    SSLKey:           "/path/to/client-key.pem",      // Client key file
+    SSLRootCert:      "/path/to/root-cert.pem",       // Root certificate file
+    ApplicationName:  "myapp",                        // Application name for pg_stat_activity
+    ConnectTimeout:   10,                             // Connection timeout in seconds
+    TargetSessionAttrs: "any",                        // For load balancing (any, read-write, read-only, primary, standby)
+    
+    // Additional connection parameters
+    Options: map[string]string{
+        "client_encoding": "UTF8",
+        "timezone":        "UTC",
+    },
+    
+    // Connection pool settings
+    MaxOpenConns:    25,
+    MaxIdleConns:    5,
+    ConnMaxLifetime: 5 * time.Minute,
+    ConnMaxIdleTime: 5 * time.Minute,
+}
+```
+
+### JSON Configuration
+
+When using JSON configuration files, the PostgreSQL options are specified as follows:
+
+```json
+{
+  "id": "postgres17",
+  "type": "postgres",
+  "host": "postgres17",
+  "port": 5432,
+  "name": "mydb",
+  "user": "postgres",
+  "password": "password",
+  "ssl_mode": "prefer",
+  "application_name": "myapp",
+  "connect_timeout": 15,
+  "target_session_attrs": "any",
+  "options": {
+    "application_name": "myapp",
+    "client_encoding": "UTF8"
+  },
+  "max_open_conns": 25,
+  "max_idle_conns": 5,
+  "conn_max_lifetime_seconds": 300,
+  "conn_max_idle_time_seconds": 60
+}
+```
+
+## Usage Examples
 
 ### Connecting to the Database
 
@@ -55,7 +133,7 @@ ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 
 // Execute a query that returns rows
-rows, err := database.Query(ctx, "SELECT id, name FROM users WHERE age > ?", 18)
+rows, err := database.Query(ctx, "SELECT id, name FROM users WHERE age > $1", 18)
 if err != nil {
     log.Fatalf("Query failed: %v", err)
 }
@@ -77,59 +155,43 @@ if err = rows.Err(); err != nil {
 }
 ```
 
-### Executing Statements
+### Using the Database Manager
 
 ```go
-// Execute a statement
-result, err := database.Exec(ctx, "UPDATE users SET active = ? WHERE last_login < ?", true, time.Now().AddDate(0, -1, 0))
+// Create a database manager
+manager := db.NewDBManager()
+
+// Load configuration from JSON
+configJSON, err := ioutil.ReadFile("config.json")
 if err != nil {
-    log.Fatalf("Statement execution failed: %v", err)
+    log.Fatalf("Failed to read config file: %v", err)
 }
 
-// Get affected rows
-rowsAffected, err := result.RowsAffected()
-if err != nil {
-    log.Printf("Failed to get affected rows: %v", err)
+if err := manager.LoadConfig(configJSON); err != nil {
+    log.Fatalf("Failed to load database config: %v", err)
 }
-fmt.Printf("Rows affected: %d\n", rowsAffected)
+
+// Connect to all databases
+if err := manager.Connect(); err != nil {
+    log.Fatalf("Failed to connect to databases: %v", err)
+}
+defer manager.CloseAll()
+
+// Get a specific database connection
+postgres17, err := manager.GetDatabase("postgres17")
+if err != nil {
+    log.Fatalf("Failed to get database: %v", err)
+}
+
+// Use the database
+// ...
 ```
 
-### Using Transactions
+## PostgreSQL 17 Support
 
-```go
-// Start a transaction
-tx, err := database.BeginTx(ctx, nil)
-if err != nil {
-    log.Fatalf("Failed to start transaction: %v", err)
-}
+This package fully supports PostgreSQL 17 by:
 
-// Execute statements within the transaction
-_, err = tx.ExecContext(ctx, "INSERT INTO users (name, email) VALUES (?, ?)", "John", "john@example.com")
-if err != nil {
-    tx.Rollback()
-    log.Fatalf("Failed to execute statement in transaction: %v", err)
-}
-
-_, err = tx.ExecContext(ctx, "UPDATE user_stats SET user_count = user_count + 1")
-if err != nil {
-    tx.Rollback()
-    log.Fatalf("Failed to execute statement in transaction: %v", err)
-}
-
-// Commit the transaction
-if err := tx.Commit(); err != nil {
-    log.Fatalf("Failed to commit transaction: %v", err)
-}
-```
-
-## Error Handling
-
-The package defines several common database errors:
-
-- `ErrNotFound`: Record not found
-- `ErrAlreadyExists`: Record already exists
-- `ErrInvalidInput`: Invalid input parameters
-- `ErrNotImplemented`: Functionality not implemented
-- `ErrNoDatabase`: No database connection
-
-These can be used for standardized error handling in your application. 
+1. Using connection string parameters compatible with PostgreSQL 17
+2. Supporting all PostgreSQL 17 connection options including TLS/SSL modes
+3. Properly handling connection pool management
+4. Working with both older and newer versions of PostgreSQL on the same codebase 
