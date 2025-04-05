@@ -103,7 +103,7 @@ The server follows Clean Architecture principles with these layers:
 | Database | Status | Features |
 |----------|--------|----------|
 | MySQL    | ✅ Full Support | Queries, Transactions, Schema Analysis, Performance Insights |
-| PostgreSQL | ✅ Full Support | Queries, Transactions, Schema Analysis, Performance Insights |
+| PostgreSQL | ✅ Full Support (v9.6-17) | Queries, Transactions, Schema Analysis, Performance Insights |
 
 ## Quick Start
 
@@ -233,7 +233,7 @@ services:
       - "3306:3306"
   
   postgres:
-    image: postgres:14
+    image: postgres:17
     environment:
       POSTGRES_DB: testdb
       POSTGRES_USER: user
