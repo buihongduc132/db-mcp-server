@@ -58,7 +58,12 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 		query := "SELECT tablename AS table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
 		rows, err = db.Query(ctx, query)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get schema information: %w", err)
+			// Fallback to a simpler query if the first one fails
+			query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+			rows, err = db.Query(ctx, query)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get schema information: %w", err)
+			}
 		}
 	} else {
 		// For MySQL

@@ -1,12 +1,16 @@
+version: '3.8'
+
 services:
   db-mcp-server:
-    image: freepeak/db-mcp-server:v1.6.2
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "9092:9092"
     volumes:
       - ./config.json:/app/config.json
       - ./wait-for-it.sh:/app/wait-for-it.sh
-    command: ["/bin/sh", "-c", "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1:3306 -t 60 && /app/wait-for-it.sh mysql2:3306 -t 60 && /app/wait-for-it.sh postgres1:5432 -t 60 && /app/wait-for-it.sh postgres-screener:5432 -t 60 && /app/server -t sse -c /app/config.json"]
+    command: ["/bin/sh", "-c", "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1 3306 && /app/wait-for-it.sh mysql2 3306 && /app/wait-for-it.sh postgres1 5432 && /app/wait-for-it.sh postgres-screener 5432 && /app/server -t sse -c /app/config.json"]
     depends_on:
       mysql1:
         condition: service_healthy
@@ -70,22 +74,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  postgres2:
-    image: postgres:17
-    environment:
-      POSTGRES_USER: user2
-      POSTGRES_PASSWORD: password2
-      POSTGRES_DB: db2
-    ports:
-      - "15433:5432"
-    volumes:
-      - postgres2_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user2 -d db2"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
+  
   postgres-screener:
     image: postgres:16.3-alpine
     environment:
@@ -106,5 +95,4 @@ volumes:
   mysql1_data:
   mysql2_data: 
   postgres1_data:
-  postgres2_data:
-  postgres_screener_data:
+  postgres_screener_data: 
