@@ -58,11 +58,16 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 		query := "SELECT tablename AS table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
 		rows, err = db.Query(ctx, query)
 		if err != nil {
-			// Fallback to a simpler query if the first one fails
+			// Fallback to a simpler PostgreSQL query
 			query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
 			rows, err = db.Query(ctx, query)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get schema information: %w", err)
+				// Second fallback for PostgreSQL - just get a list of relations
+				query = "SELECT relname AS table_name FROM pg_catalog.pg_class WHERE relkind = 'r' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public')"
+				rows, err = db.Query(ctx, query)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get schema information: %w", err)
+				}
 			}
 		}
 	} else {
@@ -70,7 +75,7 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 		query := "SELECT table_name, table_type, engine, table_rows, create_time FROM information_schema.tables WHERE table_schema = DATABASE()"
 		rows, err = db.Query(ctx, query)
 		if err != nil {
-			// Fallback to a simpler query
+			// Fallback to a simpler query for MySQL
 			query = "SHOW TABLES"
 			rows, err = db.Query(ctx, query)
 			if err != nil {
