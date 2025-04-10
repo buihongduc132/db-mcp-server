@@ -1,12 +1,19 @@
+version: "3.8"
+
 services:
   db-mcp-server:
-    image: freepeak/db-mcp-server:v1.6.2
+    image: freepeak/db-mcp-server:latest
     ports:
       - "9092:9092"
     volumes:
       - ./config.json:/app/config.json
       - ./wait-for-it.sh:/app/wait-for-it.sh
-    command: ["/bin/sh", "-c", "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1:3306 -t 60 && /app/wait-for-it.sh mysql2:3306 -t 60 && /app/wait-for-it.sh postgres1:5432 -t 60 && /app/server -t sse -c /app/config.json"]
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1 3306 30 && /app/wait-for-it.sh mysql2 3306 30 && /app/wait-for-it.sh postgres1 5432 30 && /app/wait-for-it.sh postgres3 5432 30 && /app/server -t sse -c /app/config.json",
+      ]
     depends_on:
       mysql1:
         condition: service_healthy
@@ -14,6 +21,10 @@ services:
         condition: service_healthy
       postgres1:
         condition: service_healthy
+      postgres3:
+        condition: service_healthy
+    networks:
+      - db-network
 
   mysql1:
     image: mysql:8.0
@@ -29,10 +40,22 @@ services:
       - mysql1_data:/var/lib/mysql
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword"]
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-ppassword",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - db-network
 
   mysql2:
     image: mysql:8.0
@@ -48,10 +71,22 @@ services:
       - mysql2_data:/var/lib/mysql
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword"]
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-ppassword",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - db-network
 
   postgres1:
     image: postgres:15
@@ -68,6 +103,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - db-network
+
   postgres2:
     image: postgres:17
     environment:
@@ -83,9 +121,34 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - db-network
+
+  postgres3:
+    image: postgres:16.3-alpine
+    environment:
+      POSTGRES_USER: screener
+      POSTGRES_PASSWORD: screenerpass
+      POSTGRES_DB: screenerdb
+    ports:
+      - "15434:5432"
+    volumes:
+      - postgres3_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U screener -d screenerdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - db-network
+
+networks:
+  db-network:
+    driver: bridge
 
 volumes:
   mysql1_data:
-  mysql2_data: 
+  mysql2_data:
   postgres1_data:
   postgres2_data:
+  postgres3_data:

@@ -21,8 +21,8 @@ RUN make build
 # Create a smaller production image
 FROM alpine:latest
 
-# Add necessary runtime packages
-RUN apk add --no-cache ca-certificates tzdata bash
+# Add necessary runtime packages and network diagnostic tools
+RUN apk add --no-cache ca-certificates tzdata bash netcat-openbsd bind-tools iputils busybox-extras
 
 # Set the working directory
 WORKDIR /app
