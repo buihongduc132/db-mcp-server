@@ -67,7 +67,7 @@ docker-stop:
 	docker rm db-mcp-server || true
 
 deploy-docker:
-	docker buildx build -t freepeak/db-mcp-server:latest .
+	docker build -t freepeak/db-mcp-server:latest .
 	docker push freepeak/db-mcp-server:latest
 
 # Default target

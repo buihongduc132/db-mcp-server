@@ -12,7 +12,7 @@ services:
       [
         "/bin/sh",
         "-c",
-        "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1 3306 30 && /app/wait-for-it.sh mysql2 3306 30 && /app/wait-for-it.sh postgres1 5432 30 && /app/wait-for-it.sh postgres-screener 5432 30 && /app/server -t sse -c /app/config.json",
+        "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1 3306 30 && /app/wait-for-it.sh mysql2 3306 30 && /app/wait-for-it.sh postgres1 5432 30 && /app/wait-for-it.sh postgres3 5432 30 && /app/server -t sse -c /app/config.json",
       ]
     depends_on:
       mysql1:
@@ -21,7 +21,7 @@ services:
         condition: service_healthy
       postgres1:
         condition: service_healthy
-      postgres-screener:
+      postgres3:
         condition: service_healthy
     networks:
       - db-network
@@ -106,24 +106,6 @@ services:
     networks:
       - db-network
 
-  postgres-screener:
-    image: postgres:16.3-alpine
-    environment:
-      POSTGRES_USER: screener
-      POSTGRES_PASSWORD: screenerpass
-      POSTGRES_DB: screenerdb
-    ports:
-      - "15434:5432"
-    volumes:
-      - postgres_screener_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U screener -d screenerdb"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    networks:
-      - db-network
-
   postgres2:
     image: postgres:17
     environment:
@@ -142,6 +124,24 @@ services:
     networks:
       - db-network
 
+  postgres3:
+    image: postgres:16.3-alpine
+    environment:
+      POSTGRES_USER: screener
+      POSTGRES_PASSWORD: screenerpass
+      POSTGRES_DB: screenerdb
+    ports:
+      - "15434:5432"
+    volumes:
+      - postgres3_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U screener -d screenerdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - db-network
+
 networks:
   db-network:
     driver: bridge
@@ -150,6 +150,5 @@ volumes:
   mysql1_data:
   mysql2_data:
   postgres1_data:
-  postgres_screener_data:
   postgres2_data:
-
+  postgres3_data:

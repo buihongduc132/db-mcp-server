@@ -215,7 +215,7 @@ services:
       [
         "/bin/sh",
         "-c",
-        "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1:3306 -t 60 && /app/wait-for-it.sh mysql2:3306 -t 60 && /app/wait-for-it.sh postgres1:5432 -t 60 && /app/wait-for-it.sh postgres-screener:5432 -t 60 && /app/server -t sse -c /app/config.json",
+        "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1:3306 -t 60 && /app/wait-for-it.sh mysql2:3306 -t 60 && /app/wait-for-it.sh postgres1:5432 -t 60 && /app/wait-for-it.sh postgres3:5432 -t 60 && /app/server -t sse -c /app/config.json",
       ]
     depends_on:
       mysql1:
@@ -224,7 +224,7 @@ services:
         condition: service_healthy
       postgres1:
         condition: service_healthy
-      postgres-screener:
+      postgres3:
         condition: service_healthy
 
   mysql1:
@@ -317,7 +317,7 @@ services:
       timeout: 5s
       retries: 10
 
-  postgres-screener:
+  postgres3:
     image: postgres:16.3-alpine
     environment:
       POSTGRES_USER: screener
@@ -411,9 +411,9 @@ Create a `config.json` file with your database connections:
       "password": "password2"
     },
     {
-      "id": "postgres-screener",
+      "id": "postgres3",
       "type": "postgres",
-      "host": "postgres-screener",
+      "host": "postgres3",
       "port": 5432,
       "name": "screenerdb",
       "user": "screener",
