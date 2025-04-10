@@ -2,9 +2,7 @@ version: "3.8"
 
 services:
   db-mcp-server:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: freepeak/db-mcp-server:latest
     ports:
       - "9092:9092"
     volumes:
