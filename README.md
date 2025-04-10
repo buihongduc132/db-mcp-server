@@ -200,47 +200,170 @@ Connect your client to `http://localhost:9092/sse` for the event stream.
 
 ### Docker Compose
 
-For development environments with database containers:
+For development environments with database containers, we provide a complete docker-compose.yml file:
 
 ```yaml
-# docker-compose.yml
-version: '3'
 services:
   db-mcp-server:
     image: freepeak/db-mcp-server:latest
     ports:
       - "9092:9092"
     volumes:
-      - ./config.json:/app/my-config.json
-    environment:
-      - TRANSPORT_MODE=sse
-      - CONFIG_PATH=/app/my-config.json
-    # Alternative using entrypoint
-    # entrypoint: ["/app/server"]
-    # command: ["-t", "sse", "-c", "/app/my-config.json"]
+      - ./config.json:/app/config.json
+      - ./wait-for-it.sh:/app/wait-for-it.sh
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        "chmod +x /app/wait-for-it.sh && /app/wait-for-it.sh mysql1:3306 -t 60 && /app/wait-for-it.sh mysql2:3306 -t 60 && /app/wait-for-it.sh postgres1:5432 -t 60 && /app/wait-for-it.sh postgres-screener:5432 -t 60 && /app/server -t sse -c /app/config.json",
+      ]
     depends_on:
-      - mysql
-      - postgres
-  
-  mysql:
-    image: mysql:8
+      mysql1:
+        condition: service_healthy
+      mysql2:
+        condition: service_healthy
+      postgres1:
+        condition: service_healthy
+      postgres-screener:
+        condition: service_healthy
+
+  mysql1:
+    image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: testdb
-      MYSQL_USER: user
-      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: db1
+      MYSQL_USER: user1
+      MYSQL_PASSWORD: password1
+      MYSQL_AUTHENTICATION_PLUGIN: mysql_native_password
     ports:
-      - "3306:3306"
-  
-  postgres:
+      - "13306:3306"
+    volumes:
+      - mysql1_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-ppassword",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mysql2:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: db2
+      MYSQL_USER: user2
+      MYSQL_PASSWORD: password2
+      MYSQL_AUTHENTICATION_PLUGIN: mysql_native_password
+    ports:
+      - "13307:3306"
+    volumes:
+      - mysql2_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-ppassword",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres1:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user1
+      POSTGRES_PASSWORD: password1
+      POSTGRES_DB: db1
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres1_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user1 -d db1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres2:
     image: postgres:17
     environment:
-      POSTGRES_DB: testdb
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: user2
+      POSTGRES_PASSWORD: password2
+      POSTGRES_DB: db2
     ports:
-      - "5432:5432"
+      - "15433:5432"
+    volumes:
+      - postgres2_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user2 -d db2"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-screener:
+    image: postgres:16.3-alpine
+    environment:
+      POSTGRES_USER: screener
+      POSTGRES_PASSWORD: screenerpass
+      POSTGRES_DB: screenerdb
+    ports:
+      - "15434:5432"
+    volumes:
+      - postgres_screener_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U screener -d screenerdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql1_data:
+  mysql2_data:
+  postgres1_data:
+  postgres2_data:
+  postgres_screener_data:
 ```
+
+Key features of this docker-compose setup:
+- The db-mcp-server container waits for all database services to be ready before starting
+- Multiple database types and versions are included (MySQL 8.0, PostgreSQL 15, 16.3, and 17)
+- All databases include health checks to ensure they're fully initialized before the server connects
+- Persistent volumes for all database services
+- Exposed ports for direct database access if needed
+
+The setup uses a `wait-for-it.sh` script to ensure all database services are fully ready before starting the server. This script checks if a TCP host/port is available before proceeding. You need to include this script in your project directory. The Docker setup mounts this script into the container and uses it to verify database availability.
+
+To use this setup:
+
+```bash
+# Start all services
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f db-mcp-server
+
+# Stop all services
+docker-compose down
+```
+
+Make sure your config.json file includes connection details matching the services defined in docker-compose.yml.
 
 ## Configuration
 
@@ -254,24 +377,53 @@ Create a `config.json` file with your database connections:
     {
       "id": "mysql1",
       "type": "mysql",
-      "host": "localhost",
+      "host": "mysql1",
       "port": 3306,
       "name": "db1",
       "user": "user1",
       "password": "password1"
     },
     {
+      "id": "mysql2",
+      "type": "mysql",
+      "host": "mysql2",
+      "port": 3306,
+      "name": "db2",
+      "user": "user2",
+      "password": "password2"
+    },
+    {
       "id": "postgres1",
       "type": "postgres",
-      "host": "localhost",
+      "host": "postgres1",
+      "port": 5432,
+      "name": "db1",
+      "user": "user1",
+      "password": "password1"
+    },
+    {
+      "id": "postgres2",
+      "type": "postgres",
+      "host": "postgres2",
       "port": 5432,
       "name": "db2",
       "user": "user2",
       "password": "password2"
+    },
+    {
+      "id": "postgres-screener",
+      "type": "postgres",
+      "host": "postgres-screener",
+      "port": 5432,
+      "name": "screenerdb",
+      "user": "screener",
+      "password": "screenerpass"
     }
   ]
 }
 ```
+
+When using the docker-compose setup, note that the `host` values should match the service names in the docker-compose.yml file.
 
 ### Command-Line Options
 
@@ -468,6 +620,11 @@ We're committed to expanding DB MCP Server to support a wide range of database s
    - Use environment variables: `-e TRANSPORT_MODE=sse -e CONFIG_PATH=/app/my-config.json`
    - Override the entrypoint: `--entrypoint /app/server freepeak/db-mcp-server -t sse -c /app/my-config.json`
    - Use shell execution: `freepeak/db-mcp-server /bin/sh -c "/app/server -t sse -c /app/my-config.json"`
+6. **Wait-for-it.sh Missing or Not Working**: If you see errors related to wait-for-it.sh:
+   - Make sure the file exists in your project directory
+   - Ensure it has executable permissions: `chmod +x wait-for-it.sh`
+   - Check for proper line endings (use Unix-style LF, not Windows-style CRLF)
+   - If you're still encountering issues, you can modify the docker-compose.yml to use service healthchecks instead
 
 ### Logs
 
@@ -678,3 +835,13 @@ If you encounter issues:
 2. Check that your OpenAI API key is set as an environment variable
 3. Verify that your agent's instructions mention the database tools specifically
 4. Inspect the server logs for any error messages
+
+## Star History
+
+<a href="https://www.star-history.com/#FreePeak/db-mcp-server&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=FreePeak/db-mcp-server&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=FreePeak/db-mcp-server&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=FreePeak/db-mcp-server&type=Date" />
+ </picture>
+</a>
