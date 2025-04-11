@@ -16,6 +16,79 @@ import (
 // TODO: Add request validation layer before processing in usecases
 // TODO: Implement proper context propagation and timeout handling
 
+// QueryFactory provides database-specific queries
+type QueryFactory interface {
+	GetTablesQueries() []string
+}
+
+// PostgresQueryFactory creates queries for PostgreSQL
+type PostgresQueryFactory struct{}
+
+func (f *PostgresQueryFactory) GetTablesQueries() []string {
+	return []string{
+		// Primary PostgreSQL query using pg_catalog (most reliable)
+		"SELECT tablename AS table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'",
+		// Fallback 1: Using information_schema
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+		// Fallback 2: Using pg_class for relations
+		"SELECT relname AS table_name FROM pg_catalog.pg_class WHERE relkind = 'r' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public')",
+	}
+}
+
+// MySQLQueryFactory creates queries for MySQL
+type MySQLQueryFactory struct{}
+
+func (f *MySQLQueryFactory) GetTablesQueries() []string {
+	return []string{
+		// Primary MySQL query
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()",
+		// Fallback MySQL query
+		"SHOW TABLES",
+	}
+}
+
+// GenericQueryFactory creates generic queries for unknown database types
+type GenericQueryFactory struct{}
+
+func (f *GenericQueryFactory) GetTablesQueries() []string {
+	return []string{
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+		"SELECT table_name FROM information_schema.tables",
+	}
+}
+
+// NewQueryFactory creates the appropriate query factory for the database type
+func NewQueryFactory(dbType string) QueryFactory {
+	switch dbType {
+	case "postgres":
+		return &PostgresQueryFactory{}
+	case "mysql":
+		return &MySQLQueryFactory{}
+	default:
+		logger.Warn("Unknown database type: %s, will use generic query factory", dbType)
+		return &GenericQueryFactory{}
+	}
+}
+
+// executeQueriesWithFallback tries multiple queries until one succeeds
+func executeQueriesWithFallback(ctx context.Context, db domain.Database, queries []string) (domain.Rows, error) {
+	var lastErr error
+	var rows domain.Rows
+
+	for i, query := range queries {
+		var err error
+		rows, err = db.Query(ctx, query)
+		if err == nil {
+			return rows, nil // Query succeeded
+		}
+		lastErr = err
+		logger.Warn("Query %d failed: %s - Error: %v", i+1, query, err)
+	}
+
+	// All queries failed
+	return nil, fmt.Errorf("all queries failed: %w", lastErr)
+}
+
 // DatabaseUseCase defines operations for managing database functionality
 type DatabaseUseCase struct {
 	repo domain.DatabaseRepository
@@ -47,41 +120,17 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 		return nil, fmt.Errorf("failed to get database type: %w", err)
 	}
 
-	// Query for tables
+	// Create appropriate query factory based on database type
+	factory := NewQueryFactory(dbType)
+
+	// Get queries for tables
+	tableQueries := factory.GetTablesQueries()
+
+	// Execute queries with fallback
 	ctx := context.Background()
-
-	// Different handling based on database type
-	var rows domain.Rows
-
-	if dbType == "postgres" {
-		// For PostgreSQL, use pg_catalog which is safer
-		query := "SELECT tablename AS table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
-		rows, err = db.Query(ctx, query)
-		if err != nil {
-			// Fallback to a simpler PostgreSQL query
-			query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
-			rows, err = db.Query(ctx, query)
-			if err != nil {
-				// Second fallback for PostgreSQL - just get a list of relations
-				query = "SELECT relname AS table_name FROM pg_catalog.pg_class WHERE relkind = 'r' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public')"
-				rows, err = db.Query(ctx, query)
-				if err != nil {
-					return nil, fmt.Errorf("failed to get schema information: %w", err)
-				}
-			}
-		}
-	} else {
-		// For MySQL
-		query := "SELECT table_name, table_type, engine, table_rows, create_time FROM information_schema.tables WHERE table_schema = DATABASE()"
-		rows, err = db.Query(ctx, query)
-		if err != nil {
-			// Fallback to a simpler query for MySQL
-			query = "SHOW TABLES"
-			rows, err = db.Query(ctx, query)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get schema information: %w", err)
-			}
-		}
+	rows, err := executeQueriesWithFallback(ctx, db, tableQueries)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get schema information: %w", err)
 	}
 
 	defer func() {
@@ -131,6 +180,7 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 	// Create result
 	result := map[string]interface{}{
 		"database": dbID,
+		"dbType":   dbType,
 		"tables":   tables,
 	}
 
