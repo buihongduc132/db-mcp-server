@@ -89,7 +89,7 @@ The server follows Clean Architecture principles with these layers:
 - **Database-Specific Tool Generation**: Auto-creates specialized tools for each connected database
 - **Clean Architecture**: Modular design with clear separation of concerns
 - **OpenAI Agents SDK Compatibility**: Full compatibility with the OpenAI Agents SDK for seamless integration with AI assistants
-- **Dynamic Database Tools**: 
+- **Dynamic Database Tools**:
   - Execute SQL queries with parameters
   - Run data modification statements with proper error handling
   - Manage database transactions across sessions
@@ -100,9 +100,9 @@ The server follows Clean Architecture principles with these layers:
 
 ## Currently Supported Databases
 
-| Database | Status | Features |
-|----------|--------|----------|
-| MySQL    | ✅ Full Support | Queries, Transactions, Schema Analysis, Performance Insights |
+| Database   | Status                    | Features                                                     |
+| ---------- | ------------------------- | ------------------------------------------------------------ |
+| MySQL      | ✅ Full Support           | Queries, Transactions, Schema Analysis, Performance Insights |
 | PostgreSQL | ✅ Full Support (v9.6-17) | Queries, Transactions, Schema Analysis, Performance Insights |
 
 ## Quick Start
@@ -172,15 +172,12 @@ For Cursor integration, add this to your `.cursor/mcp.json`:
 
 ```json
 {
-    "mcpServers": {
-        "stdio-db-mcp-server": {
-            "command": "/path/to/db-mcp-server/server",
-            "args": [
-                "-t", "stdio",
-                "-c", "/path/to/config.json"
-            ]
-        }
+  "mcpServers": {
+    "stdio-db-mcp-server": {
+      "command": "/path/to/db-mcp-server/server",
+      "args": ["-t", "stdio", "-c", "/path/to/config.json"]
     }
+  }
 }
 ```
 
@@ -223,6 +220,8 @@ services:
       mysql2:
         condition: service_healthy
       postgres1:
+        condition: service_healthy
+      postgres2:
         condition: service_healthy
       postgres3:
         condition: service_healthy
@@ -342,6 +341,7 @@ volumes:
 ```
 
 Key features of this docker-compose setup:
+
 - The db-mcp-server container waits for all database services to be ready before starting
 - Multiple database types and versions are included (MySQL 8.0, PostgreSQL 15, 16.3, and 17)
 - All databases include health checks to ensure they're fully initialized before the server connects
@@ -458,10 +458,12 @@ The server automatically generates tools with names following this format:
 ```
 
 Where:
+
 - `<tool_type>`: One of: query, execute, transaction, schema, performance
 - `<database_id>`: The ID of the database as defined in your configuration
 
 Example tool names for a database with ID "mysql1":
+
 - `query_mysql1`
 - `execute_mysql1`
 - `transaction_mysql1`
@@ -471,6 +473,7 @@ Example tool names for a database with ID "mysql1":
 ### Database-Specific Tools
 
 - `query_<dbid>`: Execute SQL queries on the specified database
+
   ```json
   {
     "query": "SELECT * FROM users WHERE age > ?",
@@ -479,6 +482,7 @@ Example tool names for a database with ID "mysql1":
   ```
 
 - `execute_<dbid>`: Execute SQL statements (INSERT, UPDATE, DELETE)
+
   ```json
   {
     "statement": "INSERT INTO users (name, email) VALUES (?, ?)",
@@ -487,13 +491,14 @@ Example tool names for a database with ID "mysql1":
   ```
 
 - `transaction_<dbid>`: Manage database transactions
+
   ```json
   // Begin transaction
   {
     "action": "begin",
     "readOnly": false
   }
-  
+
   // Execute within transaction
   {
     "action": "execute",
@@ -501,7 +506,7 @@ Example tool names for a database with ID "mysql1":
     "statement": "UPDATE users SET active = ? WHERE id = ?",
     "params": [true, 42]
   }
-  
+
   // Commit transaction
   {
     "action": "commit",
@@ -510,6 +515,7 @@ Example tool names for a database with ID "mysql1":
   ```
 
 - `schema_<dbid>`: Get database schema information
+
   ```json
   {
     "random_string": "dummy"
@@ -591,16 +597,19 @@ Example tool names for a database with ID "mysql1":
 We're committed to expanding DB MCP Server to support a wide range of database systems:
 
 ### Q3 2025
+
 - **MongoDB** - Support for document-oriented database operations
 - **SQLite** - Lightweight embedded database integration
 - **MariaDB** - Complete feature parity with MySQL implementation
 
 ### Q4 2025
+
 - **Microsoft SQL Server** - Enterprise database support with T-SQL capabilities
 - **Oracle Database** - Enterprise-grade integration
 - **Redis** - Key-value store operations
 
 ### 2026
+
 - **Cassandra** - Distributed NoSQL database support
 - **Elasticsearch** - Specialized search and analytics capabilities
 - **CockroachDB** - Distributed SQL database for global-scale applications
@@ -629,6 +638,7 @@ We're committed to expanding DB MCP Server to support a wide range of database s
 ### Logs
 
 The server writes logs to:
+
 - STDIO mode: stderr
 - SSE mode: stdout and `./logs/db-mcp-server.log`
 
@@ -644,7 +654,7 @@ Contributions are welcome! Here's how you can help:
 
 1. **Fork** the repository
 2. **Create** a feature branch: `git checkout -b new-feature`
-3. **Commit** your changes: `git commit -am 'Add new feature'` 
+3. **Commit** your changes: `git commit -am 'Add new feature'`
 4. **Push** to the branch: `git push origin new-feature`
 5. **Submit** a pull request
 
@@ -687,17 +697,12 @@ In your Cursor configuration (`~/.cursor/mcp.json`), you should have a configura
 
 ```json
 {
-    "mcpServers": {
-        "multidb": {
-            "command": "/path/to/db-mcp-server/server",
-            "args": [
-                "-t",
-                "stdio",
-                "-c",
-                "/path/to/database_config.json"
-            ]
-        }
+  "mcpServers": {
+    "multidb": {
+      "command": "/path/to/db-mcp-server/server",
+      "args": ["-t", "stdio", "-c", "/path/to/database_config.json"]
     }
+  }
 }
 ```
 
@@ -712,6 +717,7 @@ mcp_<server_name>_<tool_type>_<database_id>
 ```
 
 Where:
+
 - `<server_name>` is the name defined in your .cursor/mcp.json (e.g., "multidb")
 - `<tool_type>` is one of: query, execute, transaction, schema, performance, list_databases
 - `<database_id>` is the database ID from your configuration (not needed for list_databases)
@@ -721,28 +727,33 @@ Where:
 For a server named "multidb" with a database ID "mysql1":
 
 1. **Listing all databases**:
+
 ```
 mcp_multidb_list_databases
 ```
 
 2. **Querying the database**:
+
 ```
 mcp_multidb_query_mysql1
 Query: SELECT * FROM users LIMIT 10
 ```
 
 3. **Viewing database schema**:
+
 ```
 mcp_multidb_schema_mysql1
 ```
 
 4. **Executing statements**:
+
 ```
 mcp_multidb_execute_mysql1
 Statement: INSERT INTO users (name, email) VALUES ('John Doe', 'john@example.com')
 ```
 
 5. **Managing transactions**:
+
 ```
 mcp_multidb_transaction_mysql1
 Action: begin
@@ -783,7 +794,7 @@ db_server = MCPServerSse(
         url="http://localhost:9095/sse",  # URL to your running DB MCP server
         schema={
             "params": {
-                "type": "array", 
+                "type": "array",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -822,6 +833,7 @@ The repository includes a test script to verify compatibility with the OpenAI Ag
 ```
 
 The script will:
+
 1. Build the server with the latest changes
 2. Start the server if it's not already running
 3. Test the connection with the OpenAI Agents SDK
