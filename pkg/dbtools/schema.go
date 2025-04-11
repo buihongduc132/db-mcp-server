@@ -2,6 +2,7 @@ package dbtools
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -102,33 +103,78 @@ func handleSchemaExplorer(ctx context.Context, params map[string]interface{}) (i
 // getTables retrieves the list of tables in the database
 func getTables(ctx context.Context, db db.Database) (interface{}, error) {
 	// Get database type from connected database
-	dbType := "mysql" // Default to MySQL
-	if db.DriverName() == "postgres" {
+	dbType := "unknown"
+	driverName := db.DriverName()
+
+	if driverName == "postgres" {
 		dbType = "postgres"
+	} else if driverName == "mysql" {
+		dbType = "mysql"
+	} else {
+		logger.Warn("Unknown database driver: %s, will attempt to use generic queries", driverName)
 	}
 
-	var query string
+	var err error
+	var rows *sql.Rows
 
 	// Use database-specific query
 	if dbType == "postgres" {
-		query = "SELECT tablename as table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
+		// Try multiple PostgreSQL queries in order of preference
+		pgQueries := []string{
+			// Primary: pg_catalog approach
+			"SELECT tablename as table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'",
+			// Secondary: information_schema approach
+			"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+			// Tertiary: pg_class approach
+			"SELECT relname as table_name FROM pg_catalog.pg_class WHERE relkind = 'r' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public')",
+		}
+
+		// Try each PostgreSQL query until one works
+		for _, pgQuery := range pgQueries {
+			rows, err = db.Query(ctx, pgQuery)
+			if err == nil {
+				break // Query succeeded
+			}
+			logger.Warn("PostgreSQL table query failed: %s - Error: %v", pgQuery, err)
+		}
+	} else if dbType == "mysql" {
+		// Try MySQL queries
+		mysqlQueries := []string{
+			// Primary: information_schema approach
+			"SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()",
+			// Secondary: SHOW TABLES approach
+			"SHOW TABLES",
+		}
+
+		// Try each MySQL query until one works
+		for _, mysqlQuery := range mysqlQueries {
+			rows, err = db.Query(ctx, mysqlQuery)
+			if err == nil {
+				break // Query succeeded
+			}
+			logger.Warn("MySQL table query failed: %s - Error: %v", mysqlQuery, err)
+		}
 	} else {
-		// MySQL
-		query = "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()"
+		// Try generic approach for unknown database types
+		genericQueries := []string{
+			// Try information_schema approach first (works on many databases)
+			"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+			"SELECT table_name FROM information_schema.tables",
+		}
+
+		// Try each generic query until one works
+		for _, genericQuery := range genericQueries {
+			rows, err = db.Query(ctx, genericQuery)
+			if err == nil {
+				break // Query succeeded
+			}
+			logger.Warn("Generic table query failed: %s - Error: %v", genericQuery, err)
+		}
 	}
 
-	rows, err := db.Query(ctx, query)
+	// If all queries failed, return error
 	if err != nil {
-		// Fallback queries if primary query fails
-		if dbType == "postgres" {
-			query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
-		} else {
-			query = "SHOW TABLES"
-		}
-		rows, err = db.Query(ctx, query)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get tables: %w", err)
-		}
+		return nil, fmt.Errorf("failed to get tables: %w", err)
 	}
 
 	defer func() {
@@ -147,40 +193,90 @@ func getTables(ctx context.Context, db db.Database) (interface{}, error) {
 
 	return map[string]interface{}{
 		"tables": results,
+		"dbType": dbType,
 	}, nil
 }
 
 // getColumns retrieves the columns for a specific table
 func getColumns(ctx context.Context, db db.Database, table string) (interface{}, error) {
 	// Get database type from connected database
-	dbType := "mysql" // Default to MySQL
-	if db.DriverName() == "postgres" {
+	dbType := "unknown"
+	driverName := db.DriverName()
+
+	if driverName == "postgres" {
 		dbType = "postgres"
+	} else if driverName == "mysql" {
+		dbType = "mysql"
+	} else {
+		logger.Warn("Unknown database driver: %s, will attempt to use generic queries", driverName)
 	}
 
-	var query string
+	var rows *sql.Rows
+	var err error
 
 	// Use database-specific query
 	if dbType == "postgres" {
-		query = `
-			SELECT column_name, data_type, 
-				   CASE WHEN is_nullable = 'YES' THEN 'YES' ELSE 'NO' END as is_nullable,
-				   column_default
-			FROM information_schema.columns 
-			WHERE table_name = $1 AND table_schema = 'public'
-			ORDER BY ordinal_position
-		`
-	} else {
-		// MySQL
-		query = `
+		// Try multiple PostgreSQL queries in order of preference
+		pgQueries := []struct {
+			query string
+			args  []interface{}
+		}{
+			{
+				query: `
+					SELECT column_name, data_type, 
+					CASE WHEN is_nullable = 'YES' THEN 'YES' ELSE 'NO' END as is_nullable,
+					column_default
+					FROM information_schema.columns 
+					WHERE table_name = $1 AND table_schema = 'public'
+					ORDER BY ordinal_position
+				`,
+				args: []interface{}{table},
+			},
+			{
+				query: `
+					SELECT a.attname as column_name, 
+					pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type,
+					CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END as is_nullable,
+					pg_catalog.pg_get_expr(d.adbin, d.adrelid) as column_default
+					FROM pg_catalog.pg_attribute a
+					LEFT JOIN pg_catalog.pg_attrdef d ON (a.attrelid = d.adrelid AND a.attnum = d.adnum)
+					WHERE a.attrelid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = $1 AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public'))
+					AND a.attnum > 0 AND NOT a.attisdropped
+					ORDER BY a.attnum
+				`,
+				args: []interface{}{table},
+			},
+		}
+
+		// Try each PostgreSQL query until one works
+		for _, pgQuery := range pgQueries {
+			rows, err = db.Query(ctx, pgQuery.query, pgQuery.args...)
+			if err == nil {
+				break // Query succeeded
+			}
+			logger.Warn("PostgreSQL column query failed: %v - Error: %v", pgQuery.query, err)
+		}
+	} else if dbType == "mysql" {
+		// MySQL query for columns
+		query := `
 			SELECT column_name, data_type, is_nullable, column_default
 			FROM information_schema.columns
 			WHERE table_name = ? AND table_schema = DATABASE()
 			ORDER BY ordinal_position
 		`
+		rows, err = db.Query(ctx, query, table)
+	} else {
+		// Generic query for unknown database types
+		query := `
+			SELECT column_name, data_type, is_nullable, column_default
+			FROM information_schema.columns
+			WHERE table_name = $1
+			ORDER BY ordinal_position
+		`
+		rows, err = db.Query(ctx, query, table)
 	}
 
-	rows, err := db.Query(ctx, query, table)
+	// If all queries failed, return error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns for table %s: %w", table, err)
 	}
@@ -202,6 +298,7 @@ func getColumns(ctx context.Context, db db.Database, table string) (interface{},
 	return map[string]interface{}{
 		"table":   table,
 		"columns": results,
+		"dbType":  dbType,
 	}, nil
 }
 

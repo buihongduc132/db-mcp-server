@@ -52,35 +52,58 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 
 	// Different handling based on database type
 	var rows domain.Rows
+	var pgQueries = []string{
+		// Primary PostgreSQL query using pg_catalog (most reliable)
+		"SELECT tablename AS table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'",
+		// Fallback 1: Using information_schema
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+		// Fallback 2: Using pg_class for relations
+		"SELECT relname AS table_name FROM pg_catalog.pg_class WHERE relkind = 'r' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public')",
+	}
+
+	var mysqlQueries = []string{
+		// Primary MySQL query
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()",
+		// Fallback MySQL query
+		"SHOW TABLES",
+	}
 
 	if dbType == "postgres" {
-		// For PostgreSQL, use pg_catalog which is safer
-		query := "SELECT tablename AS table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'"
-		rows, err = db.Query(ctx, query)
-		if err != nil {
-			// Fallback to a simpler PostgreSQL query
-			query = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+		// Try PostgreSQL queries in sequence until one works
+		var lastErr error
+		for _, query := range pgQueries {
 			rows, err = db.Query(ctx, query)
-			if err != nil {
-				// Second fallback for PostgreSQL - just get a list of relations
-				query = "SELECT relname AS table_name FROM pg_catalog.pg_class WHERE relkind = 'r' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public')"
-				rows, err = db.Query(ctx, query)
-				if err != nil {
-					return nil, fmt.Errorf("failed to get schema information: %w", err)
-				}
+			if err == nil {
+				break // Success, stop trying more queries
 			}
+			lastErr = err
+			logger.Warn("PostgreSQL query failed: %s - Error: %v", query, err)
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to get schema information after trying all PostgreSQL queries: %w", lastErr)
+		}
+	} else if dbType == "mysql" {
+		// Try MySQL queries in sequence until one works
+		var lastErr error
+		for _, query := range mysqlQueries {
+			rows, err = db.Query(ctx, query)
+			if err == nil {
+				break // Success, stop trying more queries
+			}
+			lastErr = err
+			logger.Warn("MySQL query failed: %s - Error: %v", query, err)
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to get schema information after trying all MySQL queries: %w", lastErr)
 		}
 	} else {
-		// For MySQL
-		query := "SELECT table_name, table_type, engine, table_rows, create_time FROM information_schema.tables WHERE table_schema = DATABASE()"
+		// Unknown database type - try generic approach
+		query := "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
 		rows, err = db.Query(ctx, query)
 		if err != nil {
-			// Fallback to a simpler query for MySQL
-			query = "SHOW TABLES"
-			rows, err = db.Query(ctx, query)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get schema information: %w", err)
-			}
+			return nil, fmt.Errorf("failed to get schema information for unknown database type %s: %w", dbType, err)
 		}
 	}
 

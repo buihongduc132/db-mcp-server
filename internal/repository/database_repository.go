@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"strings"
+	"fmt"
 
 	"github.com/FreePeak/db-mcp-server/internal/domain"
 	"github.com/FreePeak/db-mcp-server/pkg/dbtools"
@@ -39,17 +39,24 @@ func (r *DatabaseRepository) ListDatabases() []string {
 
 // GetDatabaseType returns the type of a database by ID
 func (r *DatabaseRepository) GetDatabaseType(id string) (string, error) {
-	// Simple approach - infer type from database ID
-	// This is a temporary solution until we have a proper way to get the connection info
-	switch {
-	case strings.HasPrefix(id, "postgres"):
+	// Get the database connection to check its actual driver
+	db, err := dbtools.GetDatabase(id)
+	if err != nil {
+		return "", fmt.Errorf("failed to get database connection for type detection: %w", err)
+	}
+
+	// Use the actual driver name to determine database type
+	driverName := db.DriverName()
+
+	switch driverName {
+	case "postgres":
 		return "postgres", nil
-	case strings.HasPrefix(id, "mysql"):
+	case "mysql":
 		return "mysql", nil
 	default:
-		// For unknown types, we can try to execute a database-specific query
-		// to identify the type, but for now we'll default to mysql
-		return "mysql", nil
+		// Unknown database type - return the actual driver name and let the caller handle it
+		// Never default to MySQL as that can cause SQL dialect issues
+		return driverName, nil
 	}
 }
 
