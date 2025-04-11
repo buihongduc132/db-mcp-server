@@ -150,7 +150,7 @@ cd db-mcp-server
 make build
 
 # Run the server in SSE mode
-./server -t sse -c config.json
+./bin/server -t sse -c config.json
 ```
 
 ## Running the Server
