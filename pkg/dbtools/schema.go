@@ -11,6 +11,330 @@ import (
 	"github.com/FreePeak/db-mcp-server/pkg/tools"
 )
 
+// DatabaseStrategy defines the interface for database-specific query strategies
+type DatabaseStrategy interface {
+	GetTablesQueries() []queryWithArgs
+	GetColumnsQueries(table string) []queryWithArgs
+	GetRelationshipsQueries(table string) []queryWithArgs
+}
+
+// NewDatabaseStrategy creates the appropriate strategy for the given database type
+func NewDatabaseStrategy(driverName string) DatabaseStrategy {
+	switch driverName {
+	case "postgres":
+		return &PostgresStrategy{}
+	case "mysql":
+		return &MySQLStrategy{}
+	default:
+		logger.Warn("Unknown database driver: %s, will use generic strategy", driverName)
+		return &GenericStrategy{}
+	}
+}
+
+// PostgresStrategy implements DatabaseStrategy for PostgreSQL
+type PostgresStrategy struct{}
+
+// GetTablesQueries returns queries for retrieving tables in PostgreSQL
+func (s *PostgresStrategy) GetTablesQueries() []queryWithArgs {
+	return []queryWithArgs{
+		// Primary: pg_catalog approach
+		{query: "SELECT tablename as table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'"},
+		// Secondary: information_schema approach
+		{query: "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"},
+		// Tertiary: pg_class approach
+		{query: "SELECT relname as table_name FROM pg_catalog.pg_class WHERE relkind = 'r' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public')"},
+	}
+}
+
+// GetColumnsQueries returns queries for retrieving columns in PostgreSQL
+func (s *PostgresStrategy) GetColumnsQueries(table string) []queryWithArgs {
+	return []queryWithArgs{
+		// Primary: information_schema approach for PostgreSQL
+		{
+			query: `
+				SELECT column_name, data_type, 
+				CASE WHEN is_nullable = 'YES' THEN 'YES' ELSE 'NO' END as is_nullable,
+				column_default
+				FROM information_schema.columns 
+				WHERE table_name = $1 AND table_schema = 'public'
+				ORDER BY ordinal_position
+			`,
+			args: []interface{}{table},
+		},
+		// Secondary: pg_catalog approach for PostgreSQL
+		{
+			query: `
+				SELECT a.attname as column_name, 
+				pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type,
+				CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END as is_nullable,
+				pg_catalog.pg_get_expr(d.adbin, d.adrelid) as column_default
+				FROM pg_catalog.pg_attribute a
+				LEFT JOIN pg_catalog.pg_attrdef d ON (a.attrelid = d.adrelid AND a.attnum = d.adnum)
+				WHERE a.attrelid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = $1 AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public'))
+				AND a.attnum > 0 AND NOT a.attisdropped
+				ORDER BY a.attnum
+			`,
+			args: []interface{}{table},
+		},
+	}
+}
+
+// GetRelationshipsQueries returns queries for retrieving relationships in PostgreSQL
+func (s *PostgresStrategy) GetRelationshipsQueries(table string) []queryWithArgs {
+	baseQueries := []queryWithArgs{
+		// Primary: Standard information_schema approach for PostgreSQL
+		{
+			query: `
+				SELECT
+					tc.table_schema,
+					tc.constraint_name,
+					tc.table_name,
+					kcu.column_name,
+					ccu.table_schema AS foreign_table_schema,
+					ccu.table_name AS foreign_table_name,
+					ccu.column_name AS foreign_column_name
+				FROM information_schema.table_constraints AS tc
+				JOIN information_schema.key_column_usage AS kcu
+					ON tc.constraint_name = kcu.constraint_name
+					AND tc.table_schema = kcu.table_schema
+				JOIN information_schema.constraint_column_usage AS ccu
+					ON ccu.constraint_name = tc.constraint_name
+					AND ccu.table_schema = tc.table_schema
+				WHERE tc.constraint_type = 'FOREIGN KEY'
+					AND tc.table_schema = 'public'
+			`,
+			args: []interface{}{},
+		},
+		// Alternate: Using pg_catalog for older PostgreSQL versions
+		{
+			query: `
+				SELECT
+					ns.nspname AS table_schema,
+					c.conname AS constraint_name,
+					cl.relname AS table_name,
+					att.attname AS column_name,
+					ns2.nspname AS foreign_table_schema,
+					cl2.relname AS foreign_table_name,
+					att2.attname AS foreign_column_name
+				FROM pg_constraint c
+				JOIN pg_class cl ON c.conrelid = cl.oid
+				JOIN pg_attribute att ON att.attrelid = cl.oid AND att.attnum = ANY(c.conkey)
+				JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+				JOIN pg_class cl2 ON c.confrelid = cl2.oid
+				JOIN pg_attribute att2 ON att2.attrelid = cl2.oid AND att2.attnum = ANY(c.confkey)
+				JOIN pg_namespace ns2 ON ns2.oid = cl2.relnamespace
+				WHERE c.contype = 'f'
+				AND ns.nspname = 'public'
+			`,
+			args: []interface{}{},
+		},
+	}
+
+	if table == "" {
+		return baseQueries
+	}
+
+	queries := make([]queryWithArgs, len(baseQueries))
+
+	// Add table filter
+	queries[0] = queryWithArgs{
+		query: baseQueries[0].query + " AND (tc.table_name = $1 OR ccu.table_name = $1)",
+		args:  []interface{}{table},
+	}
+
+	queries[1] = queryWithArgs{
+		query: baseQueries[1].query + " AND (cl.relname = $1 OR cl2.relname = $1)",
+		args:  []interface{}{table},
+	}
+
+	return queries
+}
+
+// MySQLStrategy implements DatabaseStrategy for MySQL
+type MySQLStrategy struct{}
+
+// GetTablesQueries returns queries for retrieving tables in MySQL
+func (s *MySQLStrategy) GetTablesQueries() []queryWithArgs {
+	return []queryWithArgs{
+		// Primary: information_schema approach
+		{query: "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()"},
+		// Secondary: SHOW TABLES approach
+		{query: "SHOW TABLES"},
+	}
+}
+
+// GetColumnsQueries returns queries for retrieving columns in MySQL
+func (s *MySQLStrategy) GetColumnsQueries(table string) []queryWithArgs {
+	return []queryWithArgs{
+		// MySQL query for columns
+		{
+			query: `
+				SELECT column_name, data_type, is_nullable, column_default
+				FROM information_schema.columns
+				WHERE table_name = ? AND table_schema = DATABASE()
+				ORDER BY ordinal_position
+			`,
+			args: []interface{}{table},
+		},
+		// Fallback for older MySQL versions
+		{
+			query: `SHOW COLUMNS FROM ` + table,
+			args:  []interface{}{},
+		},
+	}
+}
+
+// GetRelationshipsQueries returns queries for retrieving relationships in MySQL
+func (s *MySQLStrategy) GetRelationshipsQueries(table string) []queryWithArgs {
+	baseQueries := []queryWithArgs{
+		// Primary approach for MySQL
+		{
+			query: `
+				SELECT
+					tc.table_schema,
+					tc.constraint_name,
+					tc.table_name,
+					kcu.column_name,
+					kcu.referenced_table_schema AS foreign_table_schema,
+					kcu.referenced_table_name AS foreign_table_name,
+					kcu.referenced_column_name AS foreign_column_name
+				FROM information_schema.table_constraints AS tc
+				JOIN information_schema.key_column_usage AS kcu
+					ON tc.constraint_name = kcu.constraint_name
+					AND tc.table_schema = kcu.table_schema
+				WHERE tc.constraint_type = 'FOREIGN KEY'
+					AND tc.table_schema = DATABASE()
+			`,
+			args: []interface{}{},
+		},
+		// Fallback using simpler query for older MySQL versions
+		{
+			query: `
+				SELECT
+					kcu.constraint_schema AS table_schema,
+					kcu.constraint_name,
+					kcu.table_name,
+					kcu.column_name,
+					kcu.referenced_table_schema AS foreign_table_schema,
+					kcu.referenced_table_name AS foreign_table_name,
+					kcu.referenced_column_name AS foreign_column_name
+				FROM information_schema.key_column_usage kcu
+				WHERE kcu.referenced_table_name IS NOT NULL
+					AND kcu.constraint_schema = DATABASE()
+			`,
+			args: []interface{}{},
+		},
+	}
+
+	if table == "" {
+		return baseQueries
+	}
+
+	queries := make([]queryWithArgs, len(baseQueries))
+
+	// Add table filter
+	queries[0] = queryWithArgs{
+		query: baseQueries[0].query + " AND (tc.table_name = ? OR kcu.referenced_table_name = ?)",
+		args:  []interface{}{table, table},
+	}
+
+	queries[1] = queryWithArgs{
+		query: baseQueries[1].query + " AND (kcu.table_name = ? OR kcu.referenced_table_name = ?)",
+		args:  []interface{}{table, table},
+	}
+
+	return queries
+}
+
+// GenericStrategy implements DatabaseStrategy for unknown database types
+type GenericStrategy struct{}
+
+// GetTablesQueries returns generic queries for retrieving tables
+func (s *GenericStrategy) GetTablesQueries() []queryWithArgs {
+	return []queryWithArgs{
+		{query: "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"},
+		{query: "SELECT table_name FROM information_schema.tables"},
+		{query: "SHOW TABLES"}, // Last resort
+	}
+}
+
+// GetColumnsQueries returns generic queries for retrieving columns
+func (s *GenericStrategy) GetColumnsQueries(table string) []queryWithArgs {
+	return []queryWithArgs{
+		// Try PostgreSQL-style query first
+		{
+			query: `
+				SELECT column_name, data_type, is_nullable, column_default
+				FROM information_schema.columns
+				WHERE table_name = $1
+				ORDER BY ordinal_position
+			`,
+			args: []interface{}{table},
+		},
+		// Try MySQL-style query
+		{
+			query: `
+				SELECT column_name, data_type, is_nullable, column_default
+				FROM information_schema.columns
+				WHERE table_name = ?
+				ORDER BY ordinal_position
+			`,
+			args: []interface{}{table},
+		},
+	}
+}
+
+// GetRelationshipsQueries returns generic queries for retrieving relationships
+func (s *GenericStrategy) GetRelationshipsQueries(table string) []queryWithArgs {
+	pgQuery := queryWithArgs{
+		query: `
+			SELECT
+				tc.table_schema,
+				tc.constraint_name,
+				tc.table_name,
+				kcu.column_name,
+				ccu.table_schema AS foreign_table_schema,
+				ccu.table_name AS foreign_table_name,
+				ccu.column_name AS foreign_column_name
+			FROM information_schema.table_constraints AS tc
+			JOIN information_schema.key_column_usage AS kcu
+				ON tc.constraint_name = kcu.constraint_name
+				AND tc.table_schema = kcu.table_schema
+			JOIN information_schema.constraint_column_usage AS ccu
+				ON ccu.constraint_name = tc.constraint_name
+				AND ccu.table_schema = tc.table_schema
+			WHERE tc.constraint_type = 'FOREIGN KEY'
+		`,
+		args: []interface{}{},
+	}
+
+	mysqlQuery := queryWithArgs{
+		query: `
+			SELECT
+				kcu.constraint_schema AS table_schema,
+				kcu.constraint_name,
+				kcu.table_name,
+				kcu.column_name,
+				kcu.referenced_table_schema AS foreign_table_schema,
+				kcu.referenced_table_name AS foreign_table_name,
+				kcu.referenced_column_name AS foreign_column_name
+			FROM information_schema.key_column_usage kcu
+			WHERE kcu.referenced_table_name IS NOT NULL
+		`,
+		args: []interface{}{},
+	}
+
+	if table != "" {
+		pgQuery.query += " AND (tc.table_name = $1 OR ccu.table_name = $1)"
+		pgQuery.args = append(pgQuery.args, table)
+
+		mysqlQuery.query += " AND (kcu.table_name = ? OR kcu.referenced_table_name = ?)"
+		mysqlQuery.args = append(mysqlQuery.args, table, table)
+	}
+
+	return []queryWithArgs{pgQuery, mysqlQuery}
+}
+
 // createSchemaExplorerTool creates a tool for exploring database schema
 func createSchemaExplorerTool() *tools.Tool {
 	return &tools.Tool{
@@ -100,79 +424,44 @@ func handleSchemaExplorer(ctx context.Context, params map[string]interface{}) (i
 	}
 }
 
+// executeWithFallbacks executes a series of database queries with fallbacks
+// Returns the first successful result or the last error encountered
+type queryWithArgs struct {
+	query string
+	args  []interface{}
+}
+
+func executeWithFallbacks(ctx context.Context, db db.Database, queries []queryWithArgs, operationName string) (*sql.Rows, error) {
+	var lastErr error
+
+	for i, q := range queries {
+		rows, err := db.Query(ctx, q.query, q.args...)
+		if err == nil {
+			return rows, nil
+		}
+
+		lastErr = err
+		logger.Warn("%s fallback query %d failed: %v - Error: %v", operationName, i+1, q.query, err)
+	}
+
+	// All queries failed, return the last error
+	return nil, fmt.Errorf("%s failed after trying %d fallback queries: %w", operationName, len(queries), lastErr)
+}
+
 // getTables retrieves the list of tables in the database
 func getTables(ctx context.Context, db db.Database) (interface{}, error) {
 	// Get database type from connected database
-	dbType := "unknown"
 	driverName := db.DriverName()
+	dbType := driverName
 
-	if driverName == "postgres" {
-		dbType = "postgres"
-	} else if driverName == "mysql" {
-		dbType = "mysql"
-	} else {
-		logger.Warn("Unknown database driver: %s, will attempt to use generic queries", driverName)
-	}
+	// Create the appropriate strategy
+	strategy := NewDatabaseStrategy(driverName)
 
-	var err error
-	var rows *sql.Rows
+	// Get queries from strategy
+	queries := strategy.GetTablesQueries()
 
-	// Use database-specific query
-	if dbType == "postgres" {
-		// Try multiple PostgreSQL queries in order of preference
-		pgQueries := []string{
-			// Primary: pg_catalog approach
-			"SELECT tablename as table_name FROM pg_catalog.pg_tables WHERE schemaname = 'public'",
-			// Secondary: information_schema approach
-			"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
-			// Tertiary: pg_class approach
-			"SELECT relname as table_name FROM pg_catalog.pg_class WHERE relkind = 'r' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public')",
-		}
-
-		// Try each PostgreSQL query until one works
-		for _, pgQuery := range pgQueries {
-			rows, err = db.Query(ctx, pgQuery)
-			if err == nil {
-				break // Query succeeded
-			}
-			logger.Warn("PostgreSQL table query failed: %s - Error: %v", pgQuery, err)
-		}
-	} else if dbType == "mysql" {
-		// Try MySQL queries
-		mysqlQueries := []string{
-			// Primary: information_schema approach
-			"SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()",
-			// Secondary: SHOW TABLES approach
-			"SHOW TABLES",
-		}
-
-		// Try each MySQL query until one works
-		for _, mysqlQuery := range mysqlQueries {
-			rows, err = db.Query(ctx, mysqlQuery)
-			if err == nil {
-				break // Query succeeded
-			}
-			logger.Warn("MySQL table query failed: %s - Error: %v", mysqlQuery, err)
-		}
-	} else {
-		// Try generic approach for unknown database types
-		genericQueries := []string{
-			// Try information_schema approach first (works on many databases)
-			"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
-			"SELECT table_name FROM information_schema.tables",
-		}
-
-		// Try each generic query until one works
-		for _, genericQuery := range genericQueries {
-			rows, err = db.Query(ctx, genericQuery)
-			if err == nil {
-				break // Query succeeded
-			}
-			logger.Warn("Generic table query failed: %s - Error: %v", genericQuery, err)
-		}
-	}
-
-	// If all queries failed, return error
+	// Execute queries with fallbacks
+	rows, err := executeWithFallbacks(ctx, db, queries, "getTables")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tables: %w", err)
 	}
@@ -200,83 +489,17 @@ func getTables(ctx context.Context, db db.Database) (interface{}, error) {
 // getColumns retrieves the columns for a specific table
 func getColumns(ctx context.Context, db db.Database, table string) (interface{}, error) {
 	// Get database type from connected database
-	dbType := "unknown"
 	driverName := db.DriverName()
+	dbType := driverName
 
-	if driverName == "postgres" {
-		dbType = "postgres"
-	} else if driverName == "mysql" {
-		dbType = "mysql"
-	} else {
-		logger.Warn("Unknown database driver: %s, will attempt to use generic queries", driverName)
-	}
+	// Create the appropriate strategy
+	strategy := NewDatabaseStrategy(driverName)
 
-	var rows *sql.Rows
-	var err error
+	// Get queries from strategy
+	queries := strategy.GetColumnsQueries(table)
 
-	// Use database-specific query
-	if dbType == "postgres" {
-		// Try multiple PostgreSQL queries in order of preference
-		pgQueries := []struct {
-			query string
-			args  []interface{}
-		}{
-			{
-				query: `
-					SELECT column_name, data_type, 
-					CASE WHEN is_nullable = 'YES' THEN 'YES' ELSE 'NO' END as is_nullable,
-					column_default
-					FROM information_schema.columns 
-					WHERE table_name = $1 AND table_schema = 'public'
-					ORDER BY ordinal_position
-				`,
-				args: []interface{}{table},
-			},
-			{
-				query: `
-					SELECT a.attname as column_name, 
-					pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type,
-					CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END as is_nullable,
-					pg_catalog.pg_get_expr(d.adbin, d.adrelid) as column_default
-					FROM pg_catalog.pg_attribute a
-					LEFT JOIN pg_catalog.pg_attrdef d ON (a.attrelid = d.adrelid AND a.attnum = d.adnum)
-					WHERE a.attrelid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = $1 AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public'))
-					AND a.attnum > 0 AND NOT a.attisdropped
-					ORDER BY a.attnum
-				`,
-				args: []interface{}{table},
-			},
-		}
-
-		// Try each PostgreSQL query until one works
-		for _, pgQuery := range pgQueries {
-			rows, err = db.Query(ctx, pgQuery.query, pgQuery.args...)
-			if err == nil {
-				break // Query succeeded
-			}
-			logger.Warn("PostgreSQL column query failed: %v - Error: %v", pgQuery.query, err)
-		}
-	} else if dbType == "mysql" {
-		// MySQL query for columns
-		query := `
-			SELECT column_name, data_type, is_nullable, column_default
-			FROM information_schema.columns
-			WHERE table_name = ? AND table_schema = DATABASE()
-			ORDER BY ordinal_position
-		`
-		rows, err = db.Query(ctx, query, table)
-	} else {
-		// Generic query for unknown database types
-		query := `
-			SELECT column_name, data_type, is_nullable, column_default
-			FROM information_schema.columns
-			WHERE table_name = $1
-			ORDER BY ordinal_position
-		`
-		rows, err = db.Query(ctx, query, table)
-	}
-
-	// If all queries failed, return error
+	// Execute queries with fallbacks
+	rows, err := executeWithFallbacks(ctx, db, queries, "getColumns["+table+"]")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns for table %s: %w", table, err)
 	}
@@ -305,66 +528,17 @@ func getColumns(ctx context.Context, db db.Database, table string) (interface{},
 // getRelationships retrieves the relationships for a table or all tables
 func getRelationships(ctx context.Context, db db.Database, table string) (interface{}, error) {
 	// Get database type from connected database
-	dbType := "mysql" // Default to MySQL
-	if db.DriverName() == "postgres" {
-		dbType = "postgres"
-	}
+	driverName := db.DriverName()
+	dbType := driverName
 
-	var query string
-	var args []interface{}
+	// Create the appropriate strategy
+	strategy := NewDatabaseStrategy(driverName)
 
-	// Use database-specific query
-	if dbType == "postgres" {
-		query = `
-			SELECT
-				tc.table_schema,
-				tc.constraint_name,
-				tc.table_name,
-				kcu.column_name,
-				ccu.table_schema AS foreign_table_schema,
-				ccu.table_name AS foreign_table_name,
-				ccu.column_name AS foreign_column_name
-			FROM information_schema.table_constraints AS tc
-			JOIN information_schema.key_column_usage AS kcu
-				ON tc.constraint_name = kcu.constraint_name
-				AND tc.table_schema = kcu.table_schema
-			JOIN information_schema.constraint_column_usage AS ccu
-				ON ccu.constraint_name = tc.constraint_name
-				AND ccu.table_schema = tc.table_schema
-			WHERE tc.constraint_type = 'FOREIGN KEY'
-				AND tc.table_schema = 'public'
-		`
+	// Get queries from strategy
+	queries := strategy.GetRelationshipsQueries(table)
 
-		if table != "" {
-			query += " AND tc.table_name = $1"
-			args = append(args, table)
-		}
-	} else {
-		// MySQL
-		query = `
-			SELECT
-				tc.table_schema,
-				tc.constraint_name,
-				tc.table_name,
-				kcu.column_name,
-				kcu.referenced_table_schema AS foreign_table_schema,
-				kcu.referenced_table_name AS foreign_table_name,
-				kcu.referenced_column_name AS foreign_column_name
-			FROM information_schema.table_constraints AS tc
-			JOIN information_schema.key_column_usage AS kcu
-				ON tc.constraint_name = kcu.constraint_name
-				AND tc.table_schema = kcu.table_schema
-			WHERE tc.constraint_type = 'FOREIGN KEY'
-				AND tc.table_schema = DATABASE()
-		`
-
-		if table != "" {
-			query += " AND tc.table_name = ?"
-			args = append(args, table)
-		}
-	}
-
-	rows, err := db.Query(ctx, query, args...)
+	// Execute queries with fallbacks
+	rows, err := executeWithFallbacks(ctx, db, queries, "getRelationships")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get relationships for table %s: %w", table, err)
 	}
@@ -385,6 +559,8 @@ func getRelationships(ctx context.Context, db db.Database, table string) (interf
 
 	return map[string]interface{}{
 		"relationships": results,
+		"dbType":        dbType,
+		"table":         table,
 	}, nil
 }
 
@@ -464,338 +640,5 @@ func getFullSchema(ctx context.Context, db db.Database) (interface{}, error) {
 		"tables":        tablesSlice,
 		"schema":        fullSchema,
 		"relationships": relMap["relationships"],
-	}, nil
-}
-
-// getMockTables returns mock table data
-//
-//nolint:unused // Mock function for testing/development
-func getMockTables() (interface{}, error) {
-	tables := []map[string]interface{}{
-		{
-			"name":                "users",
-			"type":                "BASE TABLE",
-			"engine":              "InnoDB",
-			"estimated_row_count": 1500,
-			"create_time":         time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"update_time":         time.Now().Add(-2 * 24 * time.Hour).Format(time.RFC3339),
-		},
-		{
-			"name":                "orders",
-			"type":                "BASE TABLE",
-			"engine":              "InnoDB",
-			"estimated_row_count": 8750,
-			"create_time":         time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"update_time":         time.Now().Add(-1 * 24 * time.Hour).Format(time.RFC3339),
-		},
-		{
-			"name":                "products",
-			"type":                "BASE TABLE",
-			"engine":              "InnoDB",
-			"estimated_row_count": 350,
-			"create_time":         time.Now().Add(-30 * 24 * time.Hour).Format(time.RFC3339),
-			"update_time":         time.Now().Add(-5 * 24 * time.Hour).Format(time.RFC3339),
-		},
-	}
-
-	return map[string]interface{}{
-		"tables": tables,
-		"count":  len(tables),
-		"type":   "mysql",
-	}, nil
-}
-
-// getMockColumns returns mock column data for a given table
-//
-//nolint:unused // Mock function for testing/development
-func getMockColumns(table string) (interface{}, error) {
-	var columns []map[string]interface{}
-
-	switch table {
-	case "users":
-		columns = []map[string]interface{}{
-			{
-				"name":              "id",
-				"type":              "int(11)",
-				"nullable":          "NO",
-				"key":               "PRI",
-				"extra":             "auto_increment",
-				"default":           nil,
-				"max_length":        nil,
-				"numeric_precision": 10,
-				"numeric_scale":     0,
-				"comment":           "User unique identifier",
-			},
-			{
-				"name":              "email",
-				"type":              "varchar(255)",
-				"nullable":          "NO",
-				"key":               "UNI",
-				"extra":             "",
-				"default":           nil,
-				"max_length":        255,
-				"numeric_precision": nil,
-				"numeric_scale":     nil,
-				"comment":           "User email address",
-			},
-			{
-				"name":              "name",
-				"type":              "varchar(100)",
-				"nullable":          "NO",
-				"key":               "",
-				"extra":             "",
-				"default":           nil,
-				"max_length":        100,
-				"numeric_precision": nil,
-				"numeric_scale":     nil,
-				"comment":           "User full name",
-			},
-			{
-				"name":              "created_at",
-				"type":              "timestamp",
-				"nullable":          "NO",
-				"key":               "",
-				"extra":             "",
-				"default":           "CURRENT_TIMESTAMP",
-				"max_length":        nil,
-				"numeric_precision": nil,
-				"numeric_scale":     nil,
-				"comment":           "Creation timestamp",
-			},
-		}
-	case "orders":
-		columns = []map[string]interface{}{
-			{
-				"name":              "id",
-				"type":              "int(11)",
-				"nullable":          "NO",
-				"key":               "PRI",
-				"extra":             "auto_increment",
-				"default":           nil,
-				"max_length":        nil,
-				"numeric_precision": 10,
-				"numeric_scale":     0,
-				"comment":           "Order ID",
-			},
-			{
-				"name":              "user_id",
-				"type":              "int(11)",
-				"nullable":          "NO",
-				"key":               "MUL",
-				"extra":             "",
-				"default":           nil,
-				"max_length":        nil,
-				"numeric_precision": 10,
-				"numeric_scale":     0,
-				"comment":           "User who placed the order",
-			},
-			{
-				"name":              "total_amount",
-				"type":              "decimal(10,2)",
-				"nullable":          "NO",
-				"key":               "",
-				"extra":             "",
-				"default":           "0.00",
-				"max_length":        nil,
-				"numeric_precision": 10,
-				"numeric_scale":     2,
-				"comment":           "Total order amount",
-			},
-			{
-				"name":              "status",
-				"type":              "enum('pending','processing','shipped','delivered')",
-				"nullable":          "NO",
-				"key":               "",
-				"extra":             "",
-				"default":           "pending",
-				"max_length":        nil,
-				"numeric_precision": nil,
-				"numeric_scale":     nil,
-				"comment":           "Order status",
-			},
-			{
-				"name":              "created_at",
-				"type":              "timestamp",
-				"nullable":          "NO",
-				"key":               "",
-				"extra":             "",
-				"default":           "CURRENT_TIMESTAMP",
-				"max_length":        nil,
-				"numeric_precision": nil,
-				"numeric_scale":     nil,
-				"comment":           "Order creation time",
-			},
-		}
-	case "products":
-		columns = []map[string]interface{}{
-			{
-				"name":              "id",
-				"type":              "int(11)",
-				"nullable":          "NO",
-				"key":               "PRI",
-				"extra":             "auto_increment",
-				"default":           nil,
-				"max_length":        nil,
-				"numeric_precision": 10,
-				"numeric_scale":     0,
-				"comment":           "Product ID",
-			},
-			{
-				"name":              "name",
-				"type":              "varchar(255)",
-				"nullable":          "NO",
-				"key":               "",
-				"extra":             "",
-				"default":           nil,
-				"max_length":        255,
-				"numeric_precision": nil,
-				"numeric_scale":     nil,
-				"comment":           "Product name",
-			},
-			{
-				"name":              "price",
-				"type":              "decimal(10,2)",
-				"nullable":          "NO",
-				"key":               "",
-				"extra":             "",
-				"default":           "0.00",
-				"max_length":        nil,
-				"numeric_precision": 10,
-				"numeric_scale":     2,
-				"comment":           "Product price",
-			},
-			{
-				"name":              "created_at",
-				"type":              "timestamp",
-				"nullable":          "NO",
-				"key":               "",
-				"extra":             "",
-				"default":           "CURRENT_TIMESTAMP",
-				"max_length":        nil,
-				"numeric_precision": nil,
-				"numeric_scale":     nil,
-				"comment":           "Product creation time",
-			},
-		}
-	default:
-		return nil, fmt.Errorf("table %s not found", table)
-	}
-
-	return map[string]interface{}{
-		"table":   table,
-		"columns": columns,
-		"count":   len(columns),
-		"type":    "mysql",
-	}, nil
-}
-
-// getMockRelationships returns mock relationship data for a given table
-//
-//nolint:unused // Mock function for testing/development
-func getMockRelationships(table string) (interface{}, error) {
-	relationships := []map[string]interface{}{
-		{
-			"constraint_name":        "fk_orders_users",
-			"table_name":             "orders",
-			"column_name":            "user_id",
-			"referenced_table_name":  "users",
-			"referenced_column_name": "id",
-			"update_rule":            "CASCADE",
-			"delete_rule":            "RESTRICT",
-		},
-		{
-			"constraint_name":        "fk_order_items_orders",
-			"table_name":             "order_items",
-			"column_name":            "order_id",
-			"referenced_table_name":  "orders",
-			"referenced_column_name": "id",
-			"update_rule":            "CASCADE",
-			"delete_rule":            "CASCADE",
-		},
-		{
-			"constraint_name":        "fk_order_items_products",
-			"table_name":             "order_items",
-			"column_name":            "product_id",
-			"referenced_table_name":  "products",
-			"referenced_column_name": "id",
-			"update_rule":            "CASCADE",
-			"delete_rule":            "RESTRICT",
-		},
-	}
-
-	// Filter by table if provided
-	if table != "" {
-		filteredRelationships := make([]map[string]interface{}, 0)
-		for _, r := range relationships {
-			if r["table_name"] == table || r["referenced_table_name"] == table {
-				filteredRelationships = append(filteredRelationships, r)
-			}
-		}
-		relationships = filteredRelationships
-	}
-
-	return map[string]interface{}{
-		"relationships": relationships,
-		"count":         len(relationships),
-		"type":          "mysql",
-		"table":         table,
-	}, nil
-}
-
-// getMockFullSchema returns a mock complete database schema
-//
-//nolint:unused // Mock function for testing/development
-func getMockFullSchema() (interface{}, error) {
-	tablesResult, err := getMockTables()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get mock tables: %w", err)
-	}
-
-	relationshipsResult, err := getMockRelationships("")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get mock relationships: %w", err)
-	}
-
-	tablesMap, err := safeGetMap(tablesResult)
-	if err != nil {
-		return nil, fmt.Errorf("invalid tables result: %w", err)
-	}
-
-	tablesSlice, ok := tablesMap["tables"].([]map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid tables data format")
-	}
-
-	tableDetails := make(map[string]interface{})
-
-	for _, tableInfo := range tablesSlice {
-		tableName, err := safeGetString(tableInfo, "name")
-		if err != nil {
-			return nil, fmt.Errorf("invalid table info: %w", err)
-		}
-
-		columnsResult, err := getMockColumns(tableName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get mock columns for table %s: %w", tableName, err)
-		}
-
-		columnsMap, err := safeGetMap(columnsResult)
-		if err != nil {
-			return nil, fmt.Errorf("invalid columns result: %w", err)
-		}
-
-		tableDetails[tableName] = columnsMap["columns"]
-	}
-
-	relMap, err := safeGetMap(relationshipsResult)
-	if err != nil {
-		return nil, fmt.Errorf("invalid relationships result: %w", err)
-	}
-
-	return map[string]interface{}{
-		"tables":        tablesMap["tables"],
-		"relationships": relMap["relationships"],
-		"tableDetails":  tableDetails,
-		"type":          "mysql",
 	}, nil
 }
