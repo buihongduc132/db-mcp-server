@@ -137,7 +137,23 @@ docker run -p 9092:9092 \
 ```
 
 > **Note**: We mount to `/app/my-config.json` because the container already has a file at `/app/config.json`.
-> If you encounter platform mismatch warnings, you can specify the platform: `--platform linux/amd64` or `--platform linux/arm64`.
+
+### Platform Support
+
+The Docker image supports multiple platforms:
+
+- `linux/amd64` - For Intel/AMD based systems (most Linux/Windows servers and desktops)
+- `linux/arm64` - For ARM64 based systems (Apple Silicon Macs, ARM servers)
+
+If you encounter platform mismatch errors (e.g., "The requested image's platform does not match the detected host platform"), specify the platform explicitly:
+
+```bash
+# For Intel/AMD (x86_64) systems
+docker run --platform linux/amd64 -p 9092:9092 freepeak/db-mcp-server
+
+# For ARM64 systems (like Apple Silicon Macs)
+docker run --platform linux/arm64 -p 9092:9092 freepeak/db-mcp-server
+```
 
 ### From Source
 
