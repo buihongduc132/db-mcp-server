@@ -1,4 +1,4 @@
-.PHONY: build run-stdio run-sse clean test client client-simple test-script build-example docker-build docker-run docker-run-stdio docker-stop
+.PHONY: build run-stdio run-sse clean test client client-simple test-script build-example docker-build docker-run docker-run-stdio docker-stop docker-build-local docker-build-multiarch docker-pull-platform deploy-docker deploy-docker-simple
 
 # Build the server
 build:
@@ -53,22 +53,90 @@ setup:
 docker-build:
 	docker build -t db-mcp-server:latest .
 
+# Build Docker image for local platform only (no push)
+docker-build-local:
+	docker build -t db-mcp-server:local .
+
+# Build multi-platform Docker image without pushing (for testing)
+# Usage: make docker-build-multiarch VERSION=v1.6.3
+# VERSION: Specify version tag (default: v1.6.3)
+docker-build-multiarch:
+	@echo "Building multi-architecture Docker image locally (linux/amd64,linux/arm64)..."
+	@VERSION=$${VERSION:-v1.6.3}; \
+	echo "Version: $$VERSION"; \
+	docker buildx create --name multiplatform-builder --use || true; \
+	docker buildx build --platform linux/amd64,linux/arm64 \
+		-t freepeak/db-mcp-server:$$VERSION \
+		--load .; \
+	docker buildx rm multiplatform-builder
+
 # Run the Docker container in SSE mode
 docker-run:
-	docker run -d --name db-mcp-server -p 9092:9092 -v $(PWD)/config.json:/app/config.json -v $(PWD)/logs:/app/logs db-mcp-server:latest
+	docker run -d --name db-mcp-server -p 9092:9092 -v $(PWD)/config.json:/app/config.json -v $(PWD)/logs:/app/logs db-mcp-server:${TAG:-latest}
 
 # Run Docker container in STDIO mode (for debugging)
 docker-run-stdio:
-	docker run -it --rm --name db-mcp-server-stdio -v $(PWD)/config.json:/app/config.json -e TRANSPORT_MODE=stdio db-mcp-server:latest
+	docker run -it --rm --name db-mcp-server-stdio -v $(PWD)/config.json:/app/config.json -e TRANSPORT_MODE=stdio db-mcp-server:${TAG:-latest}
 
 # Stop and remove the Docker container
 docker-stop:
 	docker stop db-mcp-server || true
 	docker rm db-mcp-server || true
 
+# Pull the latest multi-platform Docker image with the correct architecture for your system
+# This is useful when switching between different architectures (AMD64/ARM64)
+docker-pull-platform:
+	@echo "Pulling the latest Docker image with the correct platform for your system..."
+	docker pull --platform $${DOCKER_PLATFORM:-linux/amd64} freepeak/db-mcp-server:latest
+
+# Build and deploy Docker image for current architecture only
+# Usage: make deploy-docker-simple VERSION=v1.6.3 LATEST=true
+# VERSION: Specify version tag (default: v1.6.3)
+# LATEST: Whether to also tag as latest (default: true)
+deploy-docker-simple:
+	@echo "Building Docker image for current architecture..."
+	@VERSION=$${VERSION:-v1.6.3}; \
+	LATEST=$${LATEST:-true}; \
+	echo "Version: $$VERSION | Tag as latest: $$LATEST"; \
+	docker build -t freepeak/db-mcp-server:$$VERSION .; \
+	if [ "$$LATEST" = "true" ]; then \
+		docker tag freepeak/db-mcp-server:$$VERSION freepeak/db-mcp-server:latest; \
+	fi; \
+	echo "To push to Docker Hub, run:"; \
+	echo "docker push freepeak/db-mcp-server:$$VERSION"; \
+	if [ "$$LATEST" = "true" ]; then \
+		echo "docker push freepeak/db-mcp-server:latest"; \
+	fi
+
+# Build and deploy multi-platform Docker image (AMD64 and ARM64)
+# Requires Docker Buildx: https://docs.docker.com/buildx/working-with-buildx/
+# Usage: make deploy-docker VERSION=v1.6.3 LATEST=true
+# VERSION: Specify version tag (default: v1.6.3)
+# LATEST: Whether to also tag as latest (default: true)
 deploy-docker:
-	docker build -t freepeak/db-mcp-server:v1.6.3 .
-	docker push freepeak/db-mcp-server:v1.6.3
+	@echo "Building multi-architecture Docker image (linux/amd64,linux/arm64)..."
+	@VERSION=$${VERSION:-v1.6.3}; \
+	LATEST=$${LATEST:-true}; \
+	echo "Version: $$VERSION | Tag as latest: $$LATEST"; \
+	if ! command -v docker buildx &> /dev/null; then \
+		echo "Error: Docker Buildx is not available."; \
+		echo "Please install it first: https://docs.docker.com/buildx/working-with-buildx/"; \
+		echo "Or use 'make deploy-docker-simple' instead for single-architecture builds."; \
+		exit 1; \
+	fi; \
+	docker buildx create --name multiplatform-builder --use || true; \
+	if [ "$$LATEST" = "true" ]; then \
+		docker buildx build --platform linux/amd64,linux/arm64 \
+			-t freepeak/db-mcp-server:$$VERSION \
+			-t freepeak/db-mcp-server:latest \
+			--push .; \
+	else \
+		docker buildx build --platform linux/amd64,linux/arm64 \
+			-t freepeak/db-mcp-server:$$VERSION \
+			--push .; \
+	fi; \
+	docker buildx rm multiplatform-builder || true
 
 # Default target
 all: build 
+

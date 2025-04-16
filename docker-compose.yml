@@ -3,6 +3,7 @@ version: "3.8"
 services:
   db-mcp-server:
     image: freepeak/db-mcp-server:latest
+    platform: ${DOCKER_PLATFORM:-linux/amd64}
     ports:
       - "9092:9092"
     volumes:
