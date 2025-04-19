@@ -3,3 +3,7 @@ logs/
 bin/
 server
 server-linux
+inspector/
+*.log
+
+config.json

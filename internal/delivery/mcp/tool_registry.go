@@ -70,7 +70,9 @@ func (tr *ToolRegistry) RegisterAllTools(ctx context.Context, useCase UseCasePro
 func (tr *ToolRegistry) registerDatabaseTools(ctx context.Context, dbID string) error {
 	// Get all tool types from the factory
 	toolTypeNames := []string{
-		"query", "execute", "transaction", "performance", "schema",
+		// Commented out db-specific tools as per requirements
+		// "query", "execute", "transaction", "performance", "schema",
+		// Instead, we'll use generic tools that work with any database
 	}
 
 	logger.Info("Registering tools for database %s", dbID)
@@ -169,6 +171,31 @@ func (tr *ToolRegistry) registerCommonTools(ctx context.Context) {
 			logger.Error("Error registering %s tool: %v", listDbName, err)
 		} else {
 			logger.Info("Successfully registered tool %s", listDbName)
+		}
+	}
+
+	// Register generic tools that work with any database
+	genericTools := []string{
+		"sql",               // Generic SQL execution
+		"db_stats",          // Database statistics
+		"table_stats",       // Table statistics
+		"get_indexes",       // Get all indexes
+		"get_constraints",   // Get all constraints
+		"get_views",         // Get all views
+		"get_types",         // Get all types
+		"get_schemas",       // Get all schemas
+		"get_sample_data",   // Get sample data from a table
+		"get_unique_values", // Get unique values from a column
+	}
+
+	for _, toolType := range genericTools {
+		_, ok := tr.factory.GetToolType(toolType)
+		if ok {
+			if err := tr.registerTool(ctx, toolType, toolType, ""); err != nil {
+				logger.Error("Error registering %s tool: %v", toolType, err)
+			} else {
+				logger.Info("Successfully registered tool %s", toolType)
+			}
 		}
 	}
 }

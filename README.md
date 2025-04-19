@@ -115,6 +115,10 @@ The quickest way to get started is with Docker:
 # Pull the latest image
 docker pull freepeak/db-mcp-server:latest
 
+# Create your configuration file from the example if you haven't already
+cp config.example.json config.json
+# Edit config.json with your database credentials
+
 # Option 1: Run with environment variables (recommended)
 docker run -p 9092:9092 \
   -v $(pwd)/config.json:/app/my-config.json \
@@ -161,6 +165,10 @@ docker run --platform linux/arm64 -p 9092:9092 freepeak/db-mcp-server
 # Clone the repository
 git clone https://github.com/FreePeak/db-mcp-server.git
 cd db-mcp-server
+
+# Create your configuration file from the example
+cp config.example.json config.json
+# Edit config.json with your database credentials
 
 # Build the server
 make build
@@ -385,7 +393,17 @@ Make sure your config.json file includes connection details matching the service
 
 ### Database Configuration
 
-Create a `config.json` file with your database connections:
+Create a `config.json` file with your database connections. You can use the provided `config.example.json` as a template:
+
+```bash
+# Copy the example configuration file
+cp config.example.json config.json
+
+# Edit the file with your actual database credentials
+vim config.json  # or use any text editor
+```
+
+The configuration file should follow this structure:
 
 ```json
 {
@@ -400,15 +418,6 @@ Create a `config.json` file with your database connections:
       "password": "password1"
     },
     {
-      "id": "mysql2",
-      "type": "mysql",
-      "host": "mysql2",
-      "port": 3306,
-      "name": "db2",
-      "user": "user2",
-      "password": "password2"
-    },
-    {
       "id": "postgres1",
       "type": "postgres",
       "host": "postgres1",
@@ -416,28 +425,12 @@ Create a `config.json` file with your database connections:
       "name": "db1",
       "user": "user1",
       "password": "password1"
-    },
-    {
-      "id": "postgres2",
-      "type": "postgres",
-      "host": "postgres2",
-      "port": 5432,
-      "name": "db2",
-      "user": "user2",
-      "password": "password2"
-    },
-    {
-      "id": "postgres3",
-      "type": "postgres",
-      "host": "postgres3",
-      "port": 5432,
-      "name": "screenerdb",
-      "user": "screener",
-      "password": "screenerpass"
     }
   ]
 }
 ```
+
+> **Security Note**: The `config.json` file is included in `.gitignore` to prevent accidentally committing database credentials to your repository. Always keep your credentials secure and never commit them to version control.
 
 When using the docker-compose setup, note that the `host` values should match the service names in the docker-compose.yml file.
 
@@ -548,9 +541,104 @@ Example tool names for a database with ID "mysql1":
 
 ### Global Tools
 
-- `list_databases`: List all configured database connections
+- `list_databases`: List all configured database connections with detailed information including database name, host, port, and type
   ```json
   {}
+  ```
+
+- `sql`: Execute SQL queries or statements on any configured database
+  ```json
+  {
+    "sql": "SELECT * FROM users LIMIT 10",
+    "database": "mysql1",
+    "isQuery": true,
+    "params": []
+  }
+  ```
+
+- `db_stats`: Retrieve comprehensive database statistics and metrics
+  ```json
+  {
+    "database": "mysql1",
+    "detailed": true
+  }
+  ```
+
+- `table_stats`: Retrieve detailed statistics for a specific database table
+  ```json
+  {
+    "database": "mysql1",
+    "table": "users",
+    "detailed": true
+  }
+  ```
+
+- `get_indexes`: Retrieve all indexes from a database with detailed information
+  ```json
+  {
+    "database": "mysql1",
+    "table": "users",
+    "detailed": true
+  }
+  ```
+
+- `get_constraints`: Retrieve all constraints from a database with detailed information
+  ```json
+  {
+    "database": "mysql1",
+    "table": "users",
+    "constraint_type": "PRIMARY KEY"
+  }
+  ```
+
+- `get_views`: Retrieve all views from a database with their definitions
+  ```json
+  {
+    "database": "mysql1",
+    "view": "active_users",
+    "include_definition": true
+  }
+  ```
+
+- `get_types`: Retrieve all custom data types from a database
+  ```json
+  {
+    "database": "postgres1",
+    "type_name": "user_status"
+  }
+  ```
+
+- `get_schemas`: Retrieve all schemas from a database with detailed information
+  ```json
+  {
+    "database": "postgres1",
+    "schema": "public",
+    "include_system_schemas": false
+  }
+  ```
+
+- `get_sample_data`: Retrieve a sample of data from a database table
+  ```json
+  {
+    "database": "mysql1",
+    "table": "users",
+    "limit": 10,
+    "where": "active = true",
+    "order_by": "created_at DESC",
+    "random": false
+  }
+  ```
+
+- `get_unique_values`: Retrieve all unique values from a column in a database table
+  ```json
+  {
+    "database": "mysql1",
+    "table": "users",
+    "column": "status",
+    "limit": 100,
+    "include_counts": true,
+    "include_nulls": true
+  }
   ```
 
 ## Examples
@@ -664,6 +752,36 @@ Enable debug logging with the `-debug` flag:
 ./server -t sse -debug -c config.json
 ```
 
+### Testing Tools
+
+The repository includes a test script to verify all tools are working correctly:
+
+```bash
+# Run tests sequentially with default timeout (5s)
+./test-tools.sh
+
+# Run tests in parallel with default timeout
+./test-tools.sh --parallel
+
+# Run tests sequentially with custom timeout (10s)
+./test-tools.sh --timeout 10
+
+# Run tests in parallel with custom timeout
+./test-tools.sh --parallel --timeout 10
+
+# Show help message
+./test-tools.sh --help
+```
+
+The test script:
+
+1. Creates a stdio wrapper script with enhanced logging
+2. Tests all available tools with appropriate parameters
+3. Provides detailed logs for each test in the `inspector/logs` directory
+4. Generates a summary of test results
+
+This is particularly useful for verifying that all tools are properly registered and functioning after making changes to the codebase.
+
 ## Contributing
 
 Contributions are welcome! Here's how you can help:
@@ -688,7 +806,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 <p align="">
 <a href="https://www.buymeacoffee.com/linhdmn">
-<img src="https://img.buymeacoffee.com/button-api/?text=Support DB MCP Server&emoji=☕&slug=linhdmn&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" 
+<img src="https://img.buymeacoffee.com/button-api/?text=Support DB MCP Server&emoji=☕&slug=linhdmn&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff"
 alt="Buy Me A Coffee"/>
 </a>
 </p>

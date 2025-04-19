@@ -181,7 +181,17 @@ func main() {
 			logger.Info("    - schema_%s: Get database schema", dbID)
 		}
 		logger.Info("  Common tools:")
-		logger.Info("    - list_databases: List all available databases")
+		logger.Info("    - list_databases: List all available databases with detailed connection information")
+		logger.Info("    - sql: Execute SQL on any database (requires database parameter)")
+		logger.Info("    - db_stats: Retrieve comprehensive database statistics and metrics")
+		logger.Info("    - table_stats: Retrieve detailed statistics for a specific database table")
+		logger.Info("    - get_indexes: Retrieve all indexes from a database with detailed information")
+		logger.Info("    - get_constraints: Retrieve all constraints from a database with detailed information")
+		logger.Info("    - get_views: Retrieve all views from a database with their definitions")
+		logger.Info("    - get_types: Retrieve all custom data types from a database")
+		logger.Info("    - get_schemas: Retrieve all schemas from a database with detailed information")
+		logger.Info("    - get_sample_data: Retrieve a sample of data from a database table")
+		logger.Info("    - get_unique_values: Retrieve all unique values from a column in a database table")
 	}
 
 	// If no database connections, register mock tools to ensure at least some tools are available

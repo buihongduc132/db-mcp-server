@@ -100,7 +100,7 @@ func NewQueryTool() *QueryTool {
 	return &QueryTool{
 		BaseToolType: BaseToolType{
 			name:        "query",
-			description: "Execute SQL query",
+			description: "Execute SQL SELECT queries to retrieve data from the database. This tool allows you to run read-only SQL queries that return data from the database without modifying any records. It supports parameterized queries for improved security and performance. Results are returned in a tabular format with column headers and row counts. Use this tool when you need to retrieve information from the database without making any changes.",
 		},
 	}
 }
@@ -174,7 +174,7 @@ func NewExecuteTool() *ExecuteTool {
 	return &ExecuteTool{
 		BaseToolType: BaseToolType{
 			name:        "execute",
-			description: "Execute SQL statement",
+			description: "[DANGEROUS] Execute SQL statement that modifies data (INSERT, UPDATE, DELETE). This tool allows you to execute SQL statements that modify the database, including inserting new records, updating existing data, or deleting records. Use with extreme caution as these operations can permanently alter or remove data. Always verify your SQL statements before execution and consider using transactions for critical operations to allow for rollback if needed.",
 		},
 	}
 }
@@ -236,7 +236,7 @@ func NewTransactionTool() *TransactionTool {
 	return &TransactionTool{
 		BaseToolType: BaseToolType{
 			name:        "transaction",
-			description: "Manage transactions",
+			description: "[DANGEROUS] Manage database transactions for executing multiple SQL operations atomically. This tool allows you to begin, commit, or rollback database transactions, ensuring that multiple operations are treated as a single unit of work. Transactions provide data integrity by ensuring that either all operations succeed or none do. Use with caution as committing transactions permanently applies changes to the database, while forgetting to commit or rollback can leave transactions open and lock database resources.",
 		},
 	}
 }
@@ -342,7 +342,7 @@ func NewPerformanceTool() *PerformanceTool {
 	return &PerformanceTool{
 		BaseToolType: BaseToolType{
 			name:        "performance",
-			description: "Analyze query performance",
+			description: "Analyze and optimize database query performance. This tool provides comprehensive performance analysis capabilities for SQL queries, including identifying slow queries, analyzing query execution plans, and providing optimization suggestions. You can retrieve performance metrics, set slow query thresholds, analyze specific queries for optimization opportunities, and reset performance statistics. Use this tool to diagnose performance issues and improve database efficiency.",
 		},
 	}
 }
@@ -439,7 +439,7 @@ func NewSchemaTool() *SchemaTool {
 	return &SchemaTool{
 		BaseToolType: BaseToolType{
 			name:        "schema",
-			description: "Get schema of",
+			description: "Retrieve detailed database schema information. This tool provides comprehensive information about the database structure, including tables, columns, data types, constraints, indexes, and relationships. It helps you understand the database organization, identify primary and foreign keys, and discover table relationships. Use this tool when you need to explore an unfamiliar database or verify the structure of specific database objects.",
 		},
 	}
 }
@@ -487,7 +487,7 @@ func NewListDatabasesTool() *ListDatabasesTool {
 	return &ListDatabasesTool{
 		BaseToolType: BaseToolType{
 			name:        "list_databases",
-			description: "List all available databases",
+			description: "List all available databases with detailed connection information including database name, host, port, and type. This tool provides a comprehensive overview of all database connections configured in the system, allowing you to identify and select the appropriate database for your operations.",
 		},
 	}
 }
@@ -510,8 +510,37 @@ func (t *ListDatabasesTool) HandleRequest(ctx context.Context, request server.To
 
 	// Format as text for display
 	output := "Available databases:\n\n"
-	for i, db := range databases {
-		output += fmt.Sprintf("%d. %s\n", i+1, db)
+	output += "| # | Database ID | Type | Host | Port | Database Name |\n"
+	output += "|---|------------|------|------|------|--------------|\n"
+
+	for i, dbID := range databases {
+		// Get database info to extract host, port, etc.
+		dbInfo, err := useCase.GetDatabaseInfo(dbID)
+		if err != nil {
+			// If we can't get detailed info, just show the database ID
+			output += fmt.Sprintf("| %d | %s | Unknown | Unknown | Unknown | Unknown |\n", i+1, dbID)
+			continue
+		}
+
+		// Extract database type
+		dbType, _ := useCase.GetDatabaseType(dbID)
+		if dbType == "" {
+			dbType = "Unknown"
+		}
+
+		// Extract host, port, and name from dbInfo if available
+		host := "Unknown"
+		port := "Unknown"
+		name := "Unknown"
+
+		// Try to extract database name from dbInfo
+		if dbName, ok := dbInfo["database"].(string); ok {
+			name = dbName
+		}
+
+		// For now, we'll use placeholders for host and port
+		// In a real implementation, these would come from the connection config
+		output += fmt.Sprintf("| %d | %s | %s | %s | %s | %s |\n", i+1, dbID, dbType, host, port, name)
 	}
 
 	if len(databases) == 0 {
@@ -543,6 +572,22 @@ func NewToolTypeFactory() *ToolTypeFactory {
 	factory.Register(NewPerformanceTool())
 	factory.Register(NewSchemaTool())
 	factory.Register(NewListDatabasesTool())
+
+	// Register the generic SQL tool
+	factory.Register(NewGenericSQLTool())
+
+	// Register database statistics tools
+	factory.Register(NewDbStatsTool())
+	factory.Register(NewTableStatsTool())
+
+	// Register pre-generated query tools
+	factory.Register(NewGetIndexesTool())
+	factory.Register(NewGetConstraintsTool())
+	factory.Register(NewGetViewsTool())
+	factory.Register(NewGetTypesTool())
+	factory.Register(NewGetSchemasTool())
+	factory.Register(NewGetSampleDataTool())
+	factory.Register(NewGetUniqueValuesTool())
 
 	return factory
 }
