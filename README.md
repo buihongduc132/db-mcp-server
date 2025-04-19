@@ -415,7 +415,8 @@ The configuration file should follow this structure:
       "port": 3306,
       "name": "db1",
       "user": "user1",
-      "password": "password1"
+      "password": "password1",
+      "description": "MySQL production database"
     },
     {
       "id": "postgres1",
@@ -424,11 +425,14 @@ The configuration file should follow this structure:
       "port": 5432,
       "name": "db1",
       "user": "user1",
-      "password": "password1"
+      "password": "password1",
+      "description": "PostgreSQL analytics database"
     }
   ]
 }
 ```
+
+The `description` field is optional but recommended to provide context about each database connection. This description will be displayed in the list_databases tool output, making it easier to identify the purpose of each database.
 
 > **Security Note**: The `config.json` file is included in `.gitignore` to prevent accidentally committing database credentials to your repository. Always keep your credentials secure and never commit them to version control.
 

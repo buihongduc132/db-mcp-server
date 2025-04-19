@@ -60,6 +60,27 @@ func (r *DatabaseRepository) GetDatabaseType(id string) (string, error) {
 	}
 }
 
+// GetDatabaseConfig returns the configuration for a database by ID
+func (r *DatabaseRepository) GetDatabaseConfig(id string) (*domain.DatabaseConnectionConfig, error) {
+	// Get the database configuration from dbtools
+	config, err := dbtools.GetDatabaseConfig(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database configuration: %w", err)
+	}
+
+	// Convert to domain.DatabaseConnectionConfig
+	return &domain.DatabaseConnectionConfig{
+		ID:          config.ID,
+		Type:        config.Type,
+		Host:        config.Host,
+		Port:        config.Port,
+		User:        config.User,
+		Password:    config.Password,
+		Name:        config.Name,
+		Description: config.Description,
+	}, nil
+}
+
 // DatabaseAdapter adapts the db.Database to the domain.Database interface
 type DatabaseAdapter struct {
 	db interface {

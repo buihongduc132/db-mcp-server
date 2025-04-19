@@ -11,13 +11,14 @@ import (
 
 // DatabaseConnectionConfig represents a single database connection configuration
 type DatabaseConnectionConfig struct {
-	ID       string `json:"id"`   // Unique identifier for this connection
-	Type     string `json:"type"` // mysql or postgres
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-	Name     string `json:"name"`
+	ID          string `json:"id"`   // Unique identifier for this connection
+	Type        string `json:"type"` // mysql or postgres
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	User        string `json:"user"`
+	Password    string `json:"password"`
+	Name        string `json:"name"`
+	Description string `json:"description"` // Optional human-readable description of this connection
 
 	// PostgreSQL specific options
 	SSLMode            string            `json:"ssl_mode,omitempty"`

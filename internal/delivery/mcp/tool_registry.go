@@ -166,7 +166,7 @@ func (tr *ToolRegistry) registerCommonTools(ctx context.Context) {
 	_, ok := tr.factory.GetToolType("list_databases")
 	if ok {
 		// Use simple name for list_databases tool
-		listDbName := "list_databases"
+		listDbName := "list_databases_server"
 		if err := tr.registerTool(ctx, "list_databases", listDbName, ""); err != nil {
 			logger.Error("Error registering %s tool: %v", listDbName, err)
 		} else {

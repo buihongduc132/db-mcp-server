@@ -120,6 +120,12 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 		return nil, fmt.Errorf("failed to get database type: %w", err)
 	}
 
+	// Get the database description if available
+	description := ""
+	if dbConfig, err := uc.repo.GetDatabaseConfig(dbID); err == nil && dbConfig != nil {
+		description = dbConfig.Description
+	}
+
 	// Create appropriate query factory based on database type
 	factory := NewQueryFactory(dbType)
 
@@ -182,6 +188,11 @@ func (uc *DatabaseUseCase) GetDatabaseInfo(dbID string) (map[string]interface{},
 		"database": dbID,
 		"dbType":   dbType,
 		"tables":   tables,
+	}
+
+	// Add description if available
+	if description != "" {
+		result["description"] = description
 	}
 
 	return result, nil

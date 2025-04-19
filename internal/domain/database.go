@@ -106,9 +106,22 @@ type ConstraintInfo struct {
 	ReferencedColumns []string
 }
 
+// DatabaseConnectionConfig represents a database connection configuration
+type DatabaseConnectionConfig struct {
+	ID          string
+	Type        string
+	Host        string
+	Port        int
+	User        string
+	Password    string
+	Name        string
+	Description string
+}
+
 // DatabaseRepository defines methods for managing database connections
 type DatabaseRepository interface {
 	GetDatabase(id string) (Database, error)
 	ListDatabases() []string
 	GetDatabaseType(id string) (string, error)
+	GetDatabaseConfig(id string) (*DatabaseConnectionConfig, error)
 }

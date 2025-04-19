@@ -177,6 +177,41 @@ func InitDatabase(cfg *Config) error {
 		return fmt.Errorf("failed to load database config: %w", err)
 	}
 
+	// Register database configurations for later retrieval
+	for _, conn := range multiDBConfig.Connections {
+		// Convert to DatabaseConnectionConfig
+		config := DatabaseConnectionConfig{
+			ID:          conn.ID,
+			Type:        string(conn.Type),
+			Host:        conn.Host,
+			Port:        conn.Port,
+			User:        conn.User,
+			Password:    conn.Password,
+			Name:        conn.Name,
+			Description: "", // Default empty description
+		}
+
+		// Try to get description from the original JSON
+		var rawConn map[string]interface{}
+		if err := json.Unmarshal(configJSON, &rawConn); err == nil {
+			if conns, ok := rawConn["connections"].([]interface{}); ok {
+				for _, c := range conns {
+					if connMap, ok := c.(map[string]interface{}); ok {
+						if id, ok := connMap["id"].(string); ok && id == conn.ID {
+							if desc, ok := connMap["description"].(string); ok {
+								config.Description = desc
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+
+		// Register the configuration
+		RegisterDatabaseConfig(config)
+	}
+
 	// Connect to all databases
 	if err := dbManager.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to databases: %w", err)

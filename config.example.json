@@ -7,7 +7,8 @@
             "port": 5432,
             "name": "postgres_db",
             "user": "postgres_user",
-            "password": "your_password_here"
+            "password": "your_password_here",
+            "description": "PostgreSQL development database for local testing"
         },
         {
             "id": "mysql_example",
@@ -16,7 +17,8 @@
             "port": 3306,
             "name": "mysql_db",
             "user": "mysql_user",
-            "password": "your_password_here"
+            "password": "your_password_here",
+            "description": "MySQL database for legacy application data"
         }
     ]
 }
